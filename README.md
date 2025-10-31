@@ -7,3 +7,5 @@ Eye tracking algorithm combining neural networks and MediaPipe framework in ordo
 - Python 3.10+
 
 ### Setup 
+
+The project is using poetry to manage dependencies
