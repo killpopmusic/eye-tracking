@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "eye-tracking"
+version = "0.1.0"
+package-mode = false
+description = ""
+authors = ["killpopmusic <tomek.talarczyk@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+numpy = "^2.3.4"
+pandas = "^2.3.3"
+matplotlib = "^3.10.7"
+scikit-learn = "^1.7.2"
+jupyterlab = "^4.4.10"
+seaborn = "^0.13.2"
+tqdm = "^4.67.1"
+torch = "==2.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
