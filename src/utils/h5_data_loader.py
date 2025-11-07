@@ -68,7 +68,10 @@ def get_h5_data_loaders(data_path, batch_size=32, num_persons=None):
     landmarks = all_landmarks[valid_indices]
     
     y = np.stack((all_marker_x[valid_indices], all_marker_y[valid_indices]), axis=-1)
-    X = landmarks.reshape(landmarks.shape[0], -1)
+    
+    # x and y from landmarks
+    landmarks_xy = landmarks[:, :, :2]
+    X = landmarks_xy.reshape(landmarks_xy.shape[0], -1)
 
     # data split
     X_train_raw, X_val_raw, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
