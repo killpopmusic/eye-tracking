@@ -41,10 +41,12 @@ def evaluate_model(model, val_loader, model_path):
     mae = mean_absolute_error(all_labels, all_preds)
     rmse = np.sqrt(mean_squared_error(all_labels, all_preds))
     r2 = r2_score(all_labels, all_preds)
+    l2_norm = np.mean(np.linalg.norm(all_labels - all_preds, axis=1))
 
     print(f"Mean Absolute Error (MAE): {mae:.4f}")
     print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
     print(f"R-squared (R²): {r2:.4f}")
+    print(f"L2 Norm: {l2_norm:.4f}")
 
     # experiment data to json
     run_summary = {
@@ -54,6 +56,7 @@ def evaluate_model(model, val_loader, model_path):
             "mae": float(mae),
             "rmse": float(rmse),
             "r2": float(r2),
+            "l2_norm": float(l2_norm),
         },
     }
     run_file = os.path.join('experiments', f"run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
