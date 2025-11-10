@@ -64,10 +64,10 @@ def evaluate_model(model, val_loader, model_path):
     except Exception as e:
         print(f"Failed to save run summary JSON: {e}")
 
-    # visualization attmept
-    plt.figure(figsize=(10, 10))
+    # visualization attempt
+    plt.figure(figsize=(25, 14))
     plt.scatter(all_labels[:, 0], all_labels[:, 1], label='Actual Points', alpha=0.6, s=100)
-    plt.scatter(all_preds[:, 0], all_preds[:, 1], label='Predicted Points', alpha=0.6, s=100, c='r')
+    plt.scatter(all_preds[:, 0], all_preds[:, 1], label='Predicted Points', alpha=0.6, s=100, c='r', marker='x')
     
     for i in range(len(all_labels)):
         plt.plot([all_labels[i, 0], all_preds[i, 0]], [all_labels[i, 1], all_preds[i, 1]], 'k-', alpha=0.2)
@@ -77,8 +77,8 @@ def evaluate_model(model, val_loader, model_path):
     plt.ylabel('Y coordinate')
     plt.legend()
     plt.grid(True)
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
+    plt.xlim(0, 2560)
+    plt.ylim(0, 1440)
     plt.gca().invert_yaxis() 
 
     plt.savefig('plot/prediction_visualization.png')
