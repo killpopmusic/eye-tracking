@@ -57,7 +57,7 @@ def train_model(model, train_loader, val_loader, num_epochs, lr, model_path):
     plt.plot(val_losses, label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
-    plt.ylim(0, 20000)
+    plt.ylim(0, 50000)
     plt.title('Training and Validation Loss')
     plt.legend()
     plt.savefig('plot/loss_curve.png')
