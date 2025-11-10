@@ -48,7 +48,6 @@ def train_model(model, train_loader, val_loader, num_epochs, lr, model_path):
         val_losses.append(val_loss)
         print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
-    # Ensure directories exist
     os.makedirs('plot', exist_ok=True)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
 
@@ -58,6 +57,7 @@ def train_model(model, train_loader, val_loader, num_epochs, lr, model_path):
     plt.plot(val_losses, label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
+    plt.ylim(0, 20000)
     plt.title('Training and Validation Loss')
     plt.legend()
     plt.savefig('plot/loss_curve.png')
