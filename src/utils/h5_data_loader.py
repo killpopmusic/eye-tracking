@@ -67,32 +67,41 @@ def get_h5_data_loaders(data_path, batch_size=32, train_person_ids=None, test_pe
     
     # Source CSVs for test set for visualization purposes
     source_csv_test = source_csv_valid[test_indices]
+    person_ids_test = person_ids_valid[test_indices]
 
     # Split train_val into train and validation
-    X_train_raw, X_val_raw, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.2, random_state=42)
+    X_train_raw, X_val_raw, y_train_raw, y_val_raw = train_test_split(X_train_val, y_train_val, test_size=0.2, random_state=42)
 
+    # Scale features
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_val_scaled = scaler.transform(X_val_raw)
     X_test_scaled = scaler.transform(X_test)
-
     joblib.dump(scaler, 'scaler.pkl')
-    print("Scaler saved to scaler.pkl")
+    print("Scaler for X saved to scaler.pkl")
+
+    # Scale targets
+    y_scaler = StandardScaler()
+    y_train_scaled = y_scaler.fit_transform(y_train_raw)
+    y_val_scaled = y_scaler.transform(y_val_raw)
+    y_test_scaled = y_scaler.transform(y_test)
+    joblib.dump(y_scaler, 'y_scaler.pkl')
+    print("Scaler for y saved to y_scaler.pkl")
 
     X_train = torch.tensor(X_train_scaled, dtype=torch.float32)
-    y_train = torch.tensor(y_train, dtype=torch.float32)
+    y_train = torch.tensor(y_train_scaled, dtype=torch.float32)
     X_val = torch.tensor(X_val_scaled, dtype=torch.float32)
-    y_val = torch.tensor(y_val, dtype=torch.float32)
-    X_test = torch.tensor(X_test_scaled, dtype=torch.float32)
-    y_test = torch.tensor(y_test, dtype=torch.float32)
+    y_val = torch.tensor(y_val_scaled, dtype=torch.float32)
+    X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
+    y_test_tensor = torch.tensor(y_test_scaled, dtype=torch.float32)
 
     train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(TensorDataset(X_test_tensor, y_test_tensor), batch_size=batch_size, shuffle=False)
 
     input_dim = X_train.shape[1]
     print(f"Train/Val dataset: {len(X_train)} training samples, {len(X_val)} validation samples")
-    print(f"Test dataset: {len(X_test)} test samples")
+    print(f"Test dataset: {len(X_test_tensor)} test samples")
     
-    return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test
+    return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test
 
