@@ -13,9 +13,9 @@ def main():
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'evaluate'], help='Mode to run the script in.')
     parser.add_argument('--model_name', type=str, default='TestModel', help='Name of the model class to use.')
     parser.add_argument('--data_path', type=str, default='data/HybridGaze.h5', help='Path to the training/evaluation data.')
-    parser.add_argument('--epochs', type=int, default=5000, help='Number of training epochs.')
+    parser.add_argument('--epochs', type=int, default=1500, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training and validation.')
-    parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
+    parser.add_argument('--lr', type=float, default=0.0002, help='Learning rate for the optimizer.')
     parser.add_argument('--model_path', type=str, default='models/gaze_model.pth', help='Path to save or load the model.')
 
     args = parser.parse_args()
@@ -41,9 +41,15 @@ def main():
     print(f"Training/Validation on {len(train_person_ids)} persons: {train_person_ids}")
     print(f"Testing on {len(test_person_ids)} persons: {test_person_ids}")
 
+    hyperparameters = {
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "learning_rate": args.lr
+    }
+
     if args.mode == 'train':
         print(f"Starting training on {device}...")
-        train_loader, val_loader, test_loader, input_features, source_csv_test, y_test, gaze_test = get_h5_data_loaders(
+        train_loader, val_loader, test_loader, input_features, source_csv_test, y_test, gaze_test, person_ids_test = get_h5_data_loaders(
             data_path=args.data_path, 
             batch_size=args.batch_size, 
             train_person_ids=train_person_ids,
@@ -54,7 +60,7 @@ def main():
         train_model(model, train_loader, val_loader, num_epochs=args.epochs, lr=args.lr, model_path=args.model_path)
         
         print("Training finished. Starting evaluation on the test set...")
-        evaluate_model(model, test_loader, args.model_path, source_csv_test, y_test, gaze_test)
+        evaluate_model(model, test_loader, args.model_path, source_csv_test, y_test, gaze_test, person_ids_test, hyperparameters)
         print("Evaluation finished.")
 
     elif args.mode == 'evaluate':
@@ -64,7 +70,7 @@ def main():
             
         print(f"Starting evaluation on {device}...")
         
-        _, _, test_loader, input_features, source_csv_test, y_test, gaze_test = get_h5_data_loaders(
+        _, _, test_loader, input_features, source_csv_test, y_test, gaze_test, person_ids_test = get_h5_data_loaders(
             data_path=args.data_path, 
             batch_size=args.batch_size,
             train_person_ids=train_person_ids,
@@ -73,7 +79,7 @@ def main():
         
         model = model_class(input_features).to(device)
         
-        evaluate_model(model, test_loader, args.model_path, source_csv_test, y_test, gaze_test)
+        evaluate_model(model, test_loader, args.model_path, source_csv_test, y_test, gaze_test, person_ids_test, hyperparameters)
         print("Evaluation finished.")
 
 if __name__ == '__main__':
