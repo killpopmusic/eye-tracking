@@ -10,14 +10,19 @@ class TestModel(nn.Module):
         self.input_features = input_features
         self.model = nn.Sequential(
             nn.Linear(input_features, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(0.25),
+
             nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(0.25),
+
             nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            
             nn.Linear(256, output_features)
         )
 
