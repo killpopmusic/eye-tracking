@@ -19,7 +19,7 @@ def normalize_landmarks(
   """
 
   if stable_indices is None:
-    stable_indices = [1, 6, 152, 234, 454]
+    stable_indices = [1, 6, 152, 10, 9]
 
   landmarks_xy = landmarks[:, :, :2]
 
