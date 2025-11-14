@@ -2,15 +2,17 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 import matplotlib.pyplot as plt
 import numpy as np
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def train_model(model, train_loader, val_loader, num_epochs, lr, model_path, patience=100):
+def train_model(model, train_loader, val_loader, num_epochs, lr, model_path, patience=60):
     model.to(device)
-    loss_fn = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    loss_fn = nn.SmoothL1Loss()
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4) #weight decay to prevent overfitting
+    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=20)
 
     torch.manual_seed(42)
     torch.cuda.manual_seed(42)
@@ -37,8 +39,7 @@ def train_model(model, train_loader, val_loader, num_epochs, lr, model_path, pat
         
         train_loss = running_loss / len(train_loader)
         train_losses.append(train_loss)
-        
-        # Validation loop
+
         model.eval()
         running_val_loss = 0.0
 
@@ -53,11 +54,12 @@ def train_model(model, train_loader, val_loader, num_epochs, lr, model_path, pat
         val_losses.append(val_loss)
         print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
-        # Early Stopping logic
+        scheduler.step(val_loss)
+
+        # early stop
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
-            # Save the state of the best model
             best_model_state = model.state_dict()
             print(f"New best validation loss: {best_val_loss:.4f}. Saving model state.")
         else:
@@ -70,18 +72,16 @@ def train_model(model, train_loader, val_loader, num_epochs, lr, model_path, pat
     os.makedirs('plot', exist_ok=True)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
 
-    # Plotting the losses
     plt.figure(figsize=(10, 5))
     plt.plot(train_losses, label='Training Loss')
     plt.plot(val_losses, label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
-    plt.ylim(0, 1)
+    plt.ylim(0, 0.3)
     plt.title('Training and Validation Loss')
     plt.legend()
     plt.savefig('plot/loss_curve.png')
 
-    # Save the best model
     if best_model_state:
         torch.save({
             'model_state_dict': best_model_state,
@@ -89,7 +89,6 @@ def train_model(model, train_loader, val_loader, num_epochs, lr, model_path, pat
         }, model_path)
         print(f"Best model saved to {model_path}")
     else:
-        # If training finishes without improvement, save the last state
         torch.save({
             'model_state_dict': model.state_dict(),
             'input_features': model.input_features,
