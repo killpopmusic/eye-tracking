@@ -34,22 +34,14 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Get all unique person IDs
     with h5py.File(args.data_path, 'r') as f:
         all_person_ids = np.unique([pid.decode('utf-8') for pid in f['data']['person_id'][:]])
 
-    # Split person IDs for training/validation and testing
-    train_person_ids = all_person_ids[[0,2,4,5,6,7,8,9,10,11,12,13,14]]  # without 0, 2, 5, 6, 7, 12, 11
+    # select id-s manually
+    train_person_ids = all_person_ids[[0,2,4,5,6,8,9,10,11,12,13,14]]  # 2 7 11 12
     test_person_ids = all_person_ids[[1,3]]
-    print(f"Training/Validation on {len(train_person_ids)} persons: {train_person_ids}")
-    print(f"Testing on {len(test_person_ids)} persons: {test_person_ids}")
 
-    hyperparameters = {
-        "epochs": args.epochs,
-        "batch_size": args.batch_size,
-        "learning_rate": args.lr,
-        "target": "gaze"
-    }
+    hyperparameters = {"epochs": args.epochs, "batch_size": args.batch_size, "learning_rate": args.lr,"target": "gaze"}
 
     if args.mode == 'train':
         train_loader, val_loader, test_loader, input_features, source_csv_test, y_test, gaze_test, person_ids_test = get_h5_data_loaders(
