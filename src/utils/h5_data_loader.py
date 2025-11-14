@@ -1,7 +1,7 @@
 import h5py
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
+from sklearn.preprocessing import RobustScaler
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 import joblib
@@ -22,7 +22,13 @@ data/ --> main group
 ├── source_csv  
 └── timestamps
 '''
-def get_h5_data_loaders(data_path, batch_size=32, train_person_ids=None, test_person_ids=None):
+def get_h5_data_loaders(
+    data_path,
+    batch_size=32,
+    train_person_ids=None,
+    test_person_ids=None,
+    normalization_mode: str = "full",#('raw','center','center_scale','center_rotate','full').
+):
 
     KEY_LANDMARK_INDICES = [
         # Right eye
@@ -37,10 +43,10 @@ def get_h5_data_loaders(data_path, batch_size=32, train_person_ids=None, test_pe
         473, 474, 475, 476, 477,
 
         # Right eyebrow
-        70, 46, 53, 52, 65, 55, 107, 66, 105, 63,
+       # 70, 46, 53, 52, 65, 55, 107, 66, 105, 63,
 
         # Left eyebrow
-        336, 285, 295, 282, 283, 276, 300, 293, 334, 296,
+       # 336, 285, 295, 282, 283, 276, 300, 293, 334, 296,
 
         # Right upper eyelid
         124, 113, 247, 30, 29, 27, 28, 56, 190, 189, 221, 222, 223, 224, 225,
@@ -52,7 +58,13 @@ def get_h5_data_loaders(data_path, batch_size=32, train_person_ids=None, test_pe
         413, 414, 286, 258, 257, 259, 260, 467, 342, 353, 445, 444, 443, 442, 441,
 
         # Left lower eyelid 
-        464, 465, 453, 452, 451, 450, 449, 448, 261, 446, 359, 255, 339, 254, 253, 252, 256, 341
+        464, 465, 453, 452, 451, 450, 449, 448, 261, 446, 359, 255, 339, 254, 253, 252, 256, 341,
+
+        #Nose 
+        #19, 1, 4, 5, 195, 197, 6, 196,# 122, 188, 114, 217, 126, 209, 49, 48, 64, 237, 44, 35, 274, 309, 392, 294, 279, 429, 355, 437, 343, 412, 357, 351,
+
+        #Chin 
+        #152,  175, 428, 199, 208, 138#,135, 169, 170, 140, 171, 396, 369, 394, 364, 367
 
     ]
 
@@ -78,14 +90,25 @@ def get_h5_data_loaders(data_path, batch_size=32, train_person_ids=None, test_pe
     all_person_ids = all_person_ids[calibration_mask]
     all_source_csv = all_source_csv[calibration_mask]
 
-    # Use only valid samples
-    valid_indices = np.where(all_is_valid)[0]
+    SCREEN_W, SCREEN_H = 2560.0, 1440.0
+
+    #validity check
+    in_screen_mask = (all_gaze_x >= 0) & (all_gaze_x < SCREEN_W) & (all_gaze_y >= 0) & (all_gaze_y < SCREEN_H)
+    valid_indices = np.where(all_is_valid & in_screen_mask)[0]
+    print(f"Filtered out {np.sum(~(all_is_valid))} samples (invalid or off-screen)")
+
     landmarks_valid = all_landmarks[valid_indices]
 
-    landmarks_normalized = normalize_landmarks(landmarks_valid, KEY_LANDMARK_INDICES)
 
-    y = np.stack((all_marker_x[valid_indices], all_marker_y[valid_indices]), axis=-1)
-    gaze_ground_truth = np.stack((all_gaze_x[valid_indices], all_gaze_y[valid_indices]), axis=-1)
+    landmarks_normalized = normalize_landmarks(landmarks_valid,KEY_LANDMARK_INDICES, mode=normalization_mode)
+
+    # Use eyetracker gaze as training target
+    gaze_pixels = np.stack((all_gaze_x[valid_indices], all_gaze_y[valid_indices]), axis=-1)
+    y = np.empty_like(gaze_pixels, dtype=np.float64)
+    y[:, 0] = (gaze_pixels[:, 0] - SCREEN_W / 2.0) / (SCREEN_W / 2.0)
+    y[:, 1] = (gaze_pixels[:, 1] - SCREEN_H / 2.0) / (SCREEN_H / 2.0)
+    # Keep pixel-space ground truth for evaluation/plots
+    gaze_ground_truth = gaze_pixels
     person_ids_valid = all_person_ids[valid_indices]
     source_csv_valid = all_source_csv[valid_indices]
     
@@ -104,23 +127,23 @@ def get_h5_data_loaders(data_path, batch_size=32, train_person_ids=None, test_pe
     person_ids_test = person_ids_valid[test_indices]
 
     # train/val split
-    X_train_raw, X_val_raw, y_train_raw, y_val_raw = train_test_split(X_train_val, y_train_val, test_size=0.2, random_state=42)
+    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+    train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_valid[train_indices]))
+    X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
+    X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
 
     # Scale features
-    scaler = StandardScaler()
+    scaler = RobustScaler() #switched to robust scaler to reduce outlier impact
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_val_scaled = scaler.transform(X_val_raw)
     X_test_scaled = scaler.transform(X_test)
     joblib.dump(scaler, 'scaler.pkl')
     print("Scaler for X saved to scaler.pkl")
 
-    # Scale targets
-    y_scaler = StandardScaler()
-    y_train_scaled = y_scaler.fit_transform(y_train_raw)
-    y_val_scaled = y_scaler.transform(y_val_raw)
-    y_test_scaled = y_scaler.transform(y_test)
-    joblib.dump(y_scaler, 'y_scaler.pkl')
-    print("Scaler for y saved to y_scaler.pkl")
+
+    y_train_scaled = y_train_raw.astype(np.float32)
+    y_val_scaled = y_val_raw.astype(np.float32)
+    y_test_scaled = y_test.astype(np.float32)
 
     X_train = torch.tensor(X_train_scaled, dtype=torch.float32)
     y_train = torch.tensor(y_train_scaled, dtype=torch.float32)
