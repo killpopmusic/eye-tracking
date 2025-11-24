@@ -27,7 +27,9 @@ def get_h5_data_loaders(
     batch_size=32,
     train_person_ids=None,
     test_person_ids=None,
-    normalization_mode: str = "full",#('raw','center','center_scale','center_rotate','full').
+    normalization_mode: str = "full",
+    grid_rows: int = 3,
+    grid_cols: int = 3
 ):
 
     KEY_LANDMARK_INDICES = [
@@ -61,10 +63,10 @@ def get_h5_data_loaders(
         464, 465, 453, 452, 451, 450, 449, 448, 261, 446, 359, 255, 339, 254, 253, 252, 256, 341,
 
         #Nose 
-        #19, 1, 4, 5, 195, 197, 6, 196,# 122, 188, 114, 217, 126, 209, 49, 48, 64, 237, 44, 35, 274, 309, 392, 294, 279, 429, 355, 437, 343, 412, 357, 351,
+        19, 1, 4, 5, 195, 197, 6, 196,# 122, 188, 114, 217, 126, 209, 49, 48, 64, 237, 44, 35, 274, 309, 392, 294, 279, 429, 355, 437, 343, 412, 357, 351,
 
         #Chin 
-        #152,  175, 428, 199, 208, 138#,135, 169, 170, 140, 171, 396, 369, 394, 364, 367
+        152,  175, 428, 199, 208, 138#,135, 169, 170, 140, 171, 396, 369, 394, 364, 367
 
     ]
 
@@ -104,15 +106,42 @@ def get_h5_data_loaders(
 
     # Use eyetracker gaze as training target
     gaze_pixels = np.stack((all_gaze_x[valid_indices], all_gaze_y[valid_indices]), axis=-1)
-    y = np.empty_like(gaze_pixels, dtype=np.float64)
-    y[:, 0] = (gaze_pixels[:, 0] - SCREEN_W / 2.0) / (SCREEN_W / 2.0)
-    y[:, 1] = (gaze_pixels[:, 1] - SCREEN_H / 2.0) / (SCREEN_H / 2.0)
+    
+    gx = np.clip(gaze_pixels[:, 0], 0, SCREEN_W - 1e-3)
+    gy = np.clip(gaze_pixels[:, 1], 0, SCREEN_H - 1e-3)
+    
+    col_width = SCREEN_W / grid_cols
+    row_height = SCREEN_H / grid_rows
+    
+    col_indices = (gx // col_width).astype(np.int64)
+    row_indices = (gy // row_height).astype(np.int64)
+    
+    # Class ID = row * num_cols + col
+    y = row_indices * grid_cols + col_indices
+
     # Keep pixel-space ground truth for evaluation/plots
     gaze_ground_truth = gaze_pixels
     person_ids_valid = all_person_ids[valid_indices]
     source_csv_valid = all_source_csv[valid_indices]
     
     X = landmarks_normalized.reshape(landmarks_normalized.shape[0], -1)
+
+    # Calculate a mean reference frame for each person
+    reference_frames = {}
+    unique_person_ids_for_ref = np.unique(person_ids_valid)
+    for person_id in unique_person_ids_for_ref:
+        person_mask = person_ids_valid == person_id
+        person_landmarks = X[person_mask]
+        reference_frames[person_id] = person_landmarks.mean(axis=0)
+
+    # Create delta features by subtracting the reference frame
+    X_delta = np.empty_like(X)
+    for i in range(X.shape[0]):
+        person_id = person_ids_valid[i]
+        X_delta[i] = X[i] - reference_frames[person_id]
+    
+    X = X_delta # Use delta features as the new input
+    # --- End of Delta Feature Calculation ---
 
     # split data into patients
     train_indices = np.where(np.isin(person_ids_valid, train_person_ids))[0]
@@ -127,7 +156,7 @@ def get_h5_data_loaders(
     person_ids_test = person_ids_valid[test_indices]
 
     # train/val split
-    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+    gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
     train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_valid[train_indices]))
     X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
     X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
@@ -141,16 +170,18 @@ def get_h5_data_loaders(
     print("Scaler for X saved to scaler.pkl")
 
 
-    y_train_scaled = y_train_raw.astype(np.float32)
-    y_val_scaled = y_val_raw.astype(np.float32)
-    y_test_scaled = y_test.astype(np.float32)
+    y_train_scaled = y_train_raw
+    y_val_scaled = y_val_raw
+    y_test_scaled = y_test
+
+    # For classification, labels must be LongTensor
+    y_train = torch.tensor(y_train_scaled, dtype=torch.long)
+    y_val = torch.tensor(y_val_scaled, dtype=torch.long)
+    y_test_tensor = torch.tensor(y_test_scaled, dtype=torch.long)
 
     X_train = torch.tensor(X_train_scaled, dtype=torch.float32)
-    y_train = torch.tensor(y_train_scaled, dtype=torch.float32)
     X_val = torch.tensor(X_val_scaled, dtype=torch.float32)
-    y_val = torch.tensor(y_val_scaled, dtype=torch.float32)
     X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
-    y_test_tensor = torch.tensor(y_test_scaled, dtype=torch.float32)
 
     train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
