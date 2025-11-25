@@ -16,10 +16,10 @@ def main():
     parser.add_argument('--data_path', type=str, default='data/HybridGaze.h5', help='Path to the training/evaluation data.')
     parser.add_argument('--epochs', type=int, default=500, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and validation.')
-    parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
+    parser.add_argument('--lr', type=float, default=0.0005, help='Learning rate for the optimizer.')
     parser.add_argument('--model_path', type=str, default='models/gaze_classifier.pth', help='Path to save or load the model.')
-    parser.add_argument('--grid_rows', type=int, default=3, help='Number of rows in the classification grid.')
-    parser.add_argument('--grid_cols', type=int, default=3, help='Number of columns in the classification grid.')
+    parser.add_argument('--grid_rows', type=int, default=2, help='Number of rows in the classification grid.')
+    parser.add_argument('--grid_cols', type=int, default=2, help='Number of columns in the classification grid.')
 
     args = parser.parse_args()
 
@@ -58,12 +58,12 @@ def main():
         'grid_cols': args.grid_cols
     }
     
-    train_loader, val_loader, test_loader, input_features, source_csv_test, y_test, gaze_test, person_ids_test = get_h5_data_loaders(**data_loader_params)
+    train_loader, val_loader, test_loader, input_features, source_csv_test, y_test, gaze_test, person_ids_test, class_weights = get_h5_data_loaders(**data_loader_params)
 
     model = model_class(input_features, num_classes=num_classes).to(device)
 
     if args.mode == 'train':
-        train_classifier(model, train_loader, val_loader, num_epochs=args.epochs, lr=args.lr, model_path=args.model_path)
+        train_classifier(model, train_loader, val_loader, num_epochs=args.epochs, lr=args.lr, model_path=args.model_path, class_weights=class_weights)
         print("Classifier training finished. Starting evaluation on the test set...")
         evaluate_classifier(model, test_loader, args.model_path, source_csv_test, y_test, gaze_test, person_ids_test, hyperparameters, grid_rows=args.grid_rows, grid_cols=args.grid_cols)
 

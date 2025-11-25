@@ -1,11 +1,12 @@
 import h5py
 import numpy as np
-from sklearn.model_selection import train_test_split, GroupShuffleSplit
-from sklearn.preprocessing import RobustScaler
+import cv2
+import math
+from sklearn.model_selection import GroupShuffleSplit
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.utils.class_weight import compute_class_weight
 import torch
 from torch.utils.data import TensorDataset, DataLoader
-import joblib
-from .landmark_normalization import normalize_landmarks
 
 '''
 H5 structure:
@@ -22,14 +23,17 @@ data/ --> main group
 ├── source_csv  
 └── timestamps
 '''
+
+
 def get_h5_data_loaders(
     data_path,
-    batch_size=32,
+    batch_size: int = 32,
     train_person_ids=None,
     test_person_ids=None,
-    normalization_mode: str = "full",
     grid_rows: int = 3,
-    grid_cols: int = 3
+    grid_cols: int = 3,
+    frame_width: int = 2560,
+    frame_height: int = 1440,
 ):
 
     KEY_LANDMARK_INDICES = [
@@ -69,127 +73,188 @@ def get_h5_data_loaders(
         152,  175, 428, 199, 208, 138#,135, 169, 170, 140, 171, 396, 369, 394, 364, 367
 
     ]
-
     with h5py.File(data_path, 'r') as f:
-        data_group = f['data']
-        
-        all_landmarks = data_group['landmarks'][:]
-        all_marker_x = data_group['marker_x'][:]
-        all_marker_y = data_group['marker_y'][:]
-        all_gaze_x = data_group['gaze_x'][:]
-        all_gaze_y = data_group['gaze_y'][:]
-        all_is_valid = data_group['is_valid'][:]
-        all_person_ids = np.array([pid.decode('utf-8') for pid in data_group['person_id'][:]])
-        all_source_csv = np.array([x.decode('utf-8') for x in data_group['source_csv'][:]])
+        g = f['data']
+        all_landmarks = g['landmarks'][:]
+        all_gaze_x = g['gaze_x'][:]
+        all_gaze_y = g['gaze_y'][:]
+        all_is_valid = g['is_valid'][:]
+        all_person_ids = np.array([pid.decode('utf-8') for pid in g['person_id'][:]])
+        all_source_csv = np.array([x.decode('utf-8') for x in g['source_csv'][:]])
 
     calibration_mask = np.isin(all_source_csv, ['data_3x3.csv', 'data_5x5.csv', 'data_smooth.csv'])
+
     all_landmarks = all_landmarks[calibration_mask]
-    all_marker_x = all_marker_x[calibration_mask]
-    all_marker_y = all_marker_y[calibration_mask]
     all_gaze_x = all_gaze_x[calibration_mask]
     all_gaze_y = all_gaze_y[calibration_mask]
     all_is_valid = all_is_valid[calibration_mask]
     all_person_ids = all_person_ids[calibration_mask]
     all_source_csv = all_source_csv[calibration_mask]
 
-    SCREEN_W, SCREEN_H = 2560.0, 1440.0
 
-    #validity check
+    #Check for off-screen gaze
+    SCREEN_W, SCREEN_H = float(frame_width), float(frame_height)
+
     in_screen_mask = (all_gaze_x >= 0) & (all_gaze_x < SCREEN_W) & (all_gaze_y >= 0) & (all_gaze_y < SCREEN_H)
-    valid_indices = np.where(all_is_valid & in_screen_mask)[0]
+    valid_idx = np.where(all_is_valid & in_screen_mask)[0]
+
     print(f"Filtered out {np.sum(~(all_is_valid))} samples (invalid or off-screen)")
 
-    landmarks_valid = all_landmarks[valid_indices]
+    landmarks_valid = all_landmarks[valid_idx]  
+    raw_subset = landmarks_valid[:, KEY_LANDMARK_INDICES, :2] 
 
 
-    landmarks_normalized = normalize_landmarks(landmarks_valid,KEY_LANDMARK_INDICES, mode=normalization_mode)
+    # Input 1: Gaze Vector
+    # Right eye
+    r_eye_corners = landmarks_valid[:, [33, 133], :2]
+    r_eye_center = np.mean(r_eye_corners, axis=1)
+    r_iris_pts = landmarks_valid[:, [468, 469, 470, 471, 472], :2]
+    r_iris_center = np.mean(r_iris_pts, axis=1)
+    r_gaze_vector = r_iris_center - r_eye_center
 
-    # Use eyetracker gaze as training target
-    gaze_pixels = np.stack((all_gaze_x[valid_indices], all_gaze_y[valid_indices]), axis=-1)
+    # Left eye
+    l_eye_corners = landmarks_valid[:, [263, 463], :2]
+    l_eye_center = np.mean(l_eye_corners, axis=1)
+    l_iris_pts = landmarks_valid[:, [473, 474, 475, 476, 477], :2]
+    l_iris_center = np.mean(l_iris_pts, axis=1)
+    l_gaze_vector = l_iris_center - l_eye_center
+
+    # Normalize vectors 
+    r_gaze_vector_norm = r_gaze_vector/ np.linalg.norm(r_gaze_vector, axis=1, keepdims=True)
+    l_gaze_vector_norm = l_gaze_vector/ np.linalg.norm(l_gaze_vector, axis=1, keepdims=True)
+
+    gaze_vectors = np.hstack((r_gaze_vector_norm, l_gaze_vector_norm)) # Shape (N, 4)
+    print(f"Example normalized gaze vector (right x,y, left x,y): {gaze_vectors[0]}")
+
+    # Input 2: Iris center
+
+    iris_centers = np.hstack((r_iris_center[:, np.newaxis], l_iris_center[:, np.newaxis]))
+
+    # --- Head Pose Estimation ---
+    # 3D Model points (Generic Face Model)
+    face_coordination_in_real_world = np.array([
+        [285, 528, 200], # Nose tip (1)
+        [285, 371, 152], # Nose top (9)
+        [197, 574, 128], # Mouth left (57)
+        [173, 425, 108], # Left eye left corner (130)
+        [360, 574, 128], # Mouth right (287)
+        [391, 425, 108]  # Right eye right corner (359)
+    ], dtype=np.float64)
+
+    # Indices in all_landmarks (MediaPipe indices)
+    # 1, 9, 57, 130, 287, 359
+    hp_indices = [1, 9, 57, 130, 287, 359]
     
-    gx = np.clip(gaze_pixels[:, 0], 0, SCREEN_W - 1e-3)
-    gy = np.clip(gaze_pixels[:, 1], 0, SCREEN_H - 1e-3)
+    # Assume a generic webcam resolution for PnP calculation (e.g. 640x480)
+    # This is independent of screen resolution. It's just to establish a coordinate system for PnP.
+    CAM_W, CAM_H = 640, 480
+    focal_length = CAM_W
+    cam_matrix = np.array([[focal_length, 0, CAM_W / 2],
+                           [0, focal_length, CAM_H / 2],
+                           [0, 0, 1]], dtype=np.float64)
+    dist_matrix = np.zeros((4, 1), dtype=np.float64)
+
+
+    hp_landmarks = all_landmarks[valid_idx][:, hp_indices, :2] # Shape (N, 6, 2)
+
+    head_pose_angles = []
     
-    col_width = SCREEN_W / grid_cols
-    row_height = SCREEN_H / grid_rows
+    for i in range(len(hp_landmarks)):
+        # Denormalize to the assumed camera resolution
+        image_points = hp_landmarks[i] * np.array([CAM_W, CAM_H])
+        
+        success, rotation_vec, transition_vec = cv2.solvePnP(
+            face_coordination_in_real_world, 
+            image_points, 
+            cam_matrix, 
+            dist_matrix,
+            flags=cv2.SOLVEPNP_ITERATIVE
+        )
+        
+        rotation_matrix, _ = cv2.Rodrigues(rotation_vec)
+        
+        # Calculate Euler angles
+        # Pitch (x), Yaw (y), Roll (z)
+        x = math.atan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
+        y = math.atan2(-rotation_matrix[2, 0], math.sqrt(rotation_matrix[0, 0] ** 2 + rotation_matrix[1, 0] ** 2))
+        z = math.atan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
+        
+        angles = np.array([x, y, z]) # Radians
+        head_pose_angles.append(angles)
+
+    scaler_angles = StandardScaler()
+    head_pose_angles = np.array(head_pose_angles, dtype=np.float32) # Shape (N, 3)
+    head_pose_angles = scaler_angles.fit_transform(head_pose_angles)
+    print(f"Example head pose angles (radians): {head_pose_angles[0]}")
+    # ----------------------------
+
+    X_flat = raw_subset.reshape(raw_subset.shape[0], -1).astype(np.float32)
+
+    # X = np.hstack((X_flat, gaze_vectors.astype(np.float32)))
+    # X = gaze_vectors.astype(np.float32)
+    X = np.hstack((X_flat, gaze_vectors, head_pose_angles)).astype(np.float32)
     
-    col_indices = (gx // col_width).astype(np.int64)
-    row_indices = (gy // row_height).astype(np.int64)
-    
-    # Class ID = row * num_cols + col
+
+    gaze_pixels = np.stack((all_gaze_x[valid_idx], all_gaze_y[valid_idx]), axis=-1)
+    gx = gaze_pixels[:, 0]
+    gy = gaze_pixels[:, 1]
+
+    col_w = SCREEN_W / grid_cols
+    row_h = SCREEN_H / grid_rows
+    col_indices = (gx // col_w).astype(np.int64)
+    row_indices = (gy // row_h).astype(np.int64)
     y = row_indices * grid_cols + col_indices
 
-    # Keep pixel-space ground truth for evaluation/plots
-    gaze_ground_truth = gaze_pixels
-    person_ids_valid = all_person_ids[valid_indices]
-    source_csv_valid = all_source_csv[valid_indices]
-    
-    X = landmarks_normalized.reshape(landmarks_normalized.shape[0], -1)
+    person_ids_valid = all_person_ids[valid_idx]
+    source_csv_valid = all_source_csv[valid_idx]
 
-    # Calculate a mean reference frame for each person
-    reference_frames = {}
-    unique_person_ids_for_ref = np.unique(person_ids_valid)
-    for person_id in unique_person_ids_for_ref:
-        person_mask = person_ids_valid == person_id
-        person_landmarks = X[person_mask]
-        reference_frames[person_id] = person_landmarks.mean(axis=0)
-
-    # Create delta features by subtracting the reference frame
-    X_delta = np.empty_like(X)
-    for i in range(X.shape[0]):
-        person_id = person_ids_valid[i]
-        X_delta[i] = X[i] - reference_frames[person_id]
-    
-    X = X_delta # Use delta features as the new input
-    # --- End of Delta Feature Calculation ---
-
-    # split data into patients
-    train_indices = np.where(np.isin(person_ids_valid, train_person_ids))[0]
-    test_indices = np.where(np.isin(person_ids_valid, test_person_ids))[0]
+    train_mask = np.isin(person_ids_valid, train_person_ids)
+    test_mask = np.isin(person_ids_valid, test_person_ids)
+    train_indices = np.where(train_mask)[0]
+    test_indices = np.where(test_mask)[0]
 
     X_train_val, y_train_val = X[train_indices], y[train_indices]
     X_test, y_test = X[test_indices], y[test_indices]
-    gaze_test = gaze_ground_truth[test_indices]
-    
-    # data needed to visualize each person later on 
+    gaze_test = gaze_pixels[test_indices]
     source_csv_test = source_csv_valid[test_indices]
     person_ids_test = person_ids_valid[test_indices]
 
-    # train/val split
-    gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
-    train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_valid[train_indices]))
-    X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
-    X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
+    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42) #random people to val
 
-    # Scale features
-    scaler = RobustScaler() #switched to robust scaler to reduce outlier impact
-    X_train_scaled = scaler.fit_transform(X_train_raw)
-    X_val_scaled = scaler.transform(X_val_raw)
-    X_test_scaled = scaler.transform(X_test)
-    joblib.dump(scaler, 'scaler.pkl')
-    print("Scaler for X saved to scaler.pkl")
+    tr_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_valid[train_indices]))
+    X_train_raw, y_train_raw = X_train_val[tr_idx], y_train_val[tr_idx]
+    X_val_raw, y_val_raw = X_train_val[val_idx], y_train_val[val_idx]
 
+    y_train_t = torch.tensor(y_train_raw, dtype=torch.long)
+    y_val_t = torch.tensor(y_val_raw, dtype=torch.long)
+    y_test_t = torch.tensor(y_test, dtype=torch.long)
+    X_train_t = torch.tensor(X_train_raw, dtype=torch.float32)
+    X_val_t = torch.tensor(X_val_raw, dtype=torch.float32)
+    X_test_t = torch.tensor(X_test, dtype=torch.float32)
 
-    y_train_scaled = y_train_raw
-    y_val_scaled = y_val_raw
-    y_test_scaled = y_test
+    train_ds = TensorDataset(X_train_t, y_train_t)
+    val_ds = TensorDataset(X_val_t, y_val_t)
+    test_ds = TensorDataset(X_test_t, y_test_t)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
 
-    # For classification, labels must be LongTensor
-    y_train = torch.tensor(y_train_scaled, dtype=torch.long)
-    y_val = torch.tensor(y_val_scaled, dtype=torch.long)
-    y_test_tensor = torch.tensor(y_test_scaled, dtype=torch.long)
+    input_dim = X_train_t.shape[1]
+    print(f"Train/Val dataset: {len(X_train_t)} training samples, {len(X_val_t)} validation samples")
+    print(f"Test dataset: {len(X_test_t)} test samples")
 
-    X_train = torch.tensor(X_train_scaled, dtype=torch.float32)
-    X_val = torch.tensor(X_val_scaled, dtype=torch.float32)
-    X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
+    unique_train, counts_train = np.unique(y_train_raw, return_counts=True)
+    print(f"Train class distribution: {dict(zip(unique_train, counts_train))}")
 
-    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(TensorDataset(X_test_tensor, y_test_tensor), batch_size=batch_size, shuffle=False)
+    unique_test, counts_test = np.unique(y_test, return_counts=True)
+    print(f"Test class distribution: {dict(zip(unique_test, counts_test))}")
 
-    input_dim = X_train.shape[1]
-    print(f"Train/Val dataset: {len(X_train)} training samples, {len(X_val)} validation samples")
-    print(f"Test dataset: {len(X_test_tensor)} test samples")
-    
-    return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test
+    class_weights = compute_class_weight(
+        class_weight='balanced', 
+        classes=np.unique(y_train_raw), 
+        y=y_train_raw
+    )
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+
+    return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test, class_weights_tensor
 

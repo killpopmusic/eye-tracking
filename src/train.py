@@ -8,10 +8,16 @@ import numpy as np
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path, patience=60):
+def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path, patience=50, class_weights=None):
     model.to(device)
-    loss_fn = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    
+    if class_weights is not None:
+        class_weights = class_weights.to(device)
+        loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+    else:
+        loss_fn = nn.CrossEntropyLoss()
+        
+    optimizer = optim.Adam(model.parameters(), lr=lr,  weight_decay=1e-4)
     scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=20)
 
     torch.manual_seed(42)
