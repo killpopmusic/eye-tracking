@@ -8,7 +8,7 @@ import numpy as np
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path, patience=60):
+def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path, patience=30):
     model.to(device)
     loss_fn = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
