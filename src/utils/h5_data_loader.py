@@ -126,24 +126,7 @@ def get_h5_data_loaders(
     
     X = landmarks_normalized.reshape(landmarks_normalized.shape[0], -1)
 
-    # Calculate a mean reference frame for each person
-    reference_frames = {}
-    unique_person_ids_for_ref = np.unique(person_ids_valid)
-    for person_id in unique_person_ids_for_ref:
-        person_mask = person_ids_valid == person_id
-        person_landmarks = X[person_mask]
-        reference_frames[person_id] = person_landmarks.mean(axis=0)
-
-    # Create delta features by subtracting the reference frame
-    X_delta = np.empty_like(X)
-    for i in range(X.shape[0]):
-        person_id = person_ids_valid[i]
-        X_delta[i] = X[i] - reference_frames[person_id]
-    
-    X = X_delta # Use delta features as the new input
-    # --- End of Delta Feature Calculation ---
-
-    # split data into patients
+    # split data into patients (train/test split by person)
     train_indices = np.where(np.isin(person_ids_valid, train_person_ids))[0]
     test_indices = np.where(np.isin(person_ids_valid, test_person_ids))[0]
 
@@ -155,9 +138,34 @@ def get_h5_data_loaders(
     source_csv_test = source_csv_valid[test_indices]
     person_ids_test = person_ids_valid[test_indices]
 
-    # train/val split
+    person_ids_train_val = person_ids_valid[train_indices]
+    reference_frames = {}
+    unique_person_ids_for_ref = np.unique(person_ids_train_val)
+    for person_id in unique_person_ids_for_ref:
+        person_mask = person_ids_train_val == person_id
+        person_landmarks = X_train_val[person_mask]
+        reference_frames[person_id] = person_landmarks.mean(axis=0)
+
+    X_train_val_delta = np.empty_like(X_train_val)
+    for i in range(X_train_val.shape[0]):
+        person_id = person_ids_train_val[i]
+        X_train_val_delta[i] = X_train_val[i] - reference_frames[person_id]
+
+    global_mean = X_train_val.mean(axis=0)
+
+    X_test_delta = np.empty_like(X_test)
+    for i in range(X_test.shape[0]):
+        person_id = person_ids_test[i]
+        ref = reference_frames.get(person_id, global_mean)
+        X_test_delta[i] = X_test[i] - ref
+
+    X_train_val = X_train_val_delta
+    X_test = X_test_delta
+    # --- End of Delta Feature Calculation (no data leakage) ---
+
+    # train/val split (GroupShuffleSplit na już przekształconym X_train_val)
     gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
-    train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_valid[train_indices]))
+    train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_train_val))
     X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
     X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
 
