@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.amp import GradScaler, autocast
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -10,9 +11,11 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path, patience=30):
     model.to(device)
-    loss_fn = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=20)
+    # Label Smoothing & AdamW & Mixed Precision
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=10)
+    scaler = GradScaler(enabled=(device == 'cuda'))
 
     torch.manual_seed(42)
     torch.cuda.manual_seed(42)
@@ -35,10 +38,17 @@ def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path
             inputs = inputs.to(device)
             labels = labels.to(device)
             optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = loss_fn(outputs, labels)
-            loss.backward()
-            optimizer.step()
+            
+            with autocast("cuda"):
+                outputs = model(inputs)
+                loss = loss_fn(outputs, labels)
+            
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+            
             running_loss += loss.item()
             
             _, predicted = torch.max(outputs.data, 1)
@@ -58,8 +68,9 @@ def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path
             for inputs, labels in val_loader:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-                outputs = model(inputs)
-                loss = loss_fn(outputs, labels)
+                with autocast("cuda"):
+                    outputs = model(inputs)
+                    loss = loss_fn(outputs, labels)
                 running_val_loss += loss.item()
                 
                 _, predicted = torch.max(outputs.data, 1)
