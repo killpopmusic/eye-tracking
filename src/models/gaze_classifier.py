@@ -6,8 +6,7 @@ class GazeClassifier(nn.Module):
         super().__init__()
         self.input_features = input_features
         self.num_classes = num_classes
-        
-        # Using a structure similar to TestModelV2 but optimized for classification
+
         self.model = nn.Sequential(
             nn.Linear(input_features,128),
             nn.LayerNorm(128),
@@ -22,8 +21,7 @@ class GazeClassifier(nn.Module):
             nn.Linear(128, 64),
             nn.LayerNorm(64),
             nn.SiLU(),
-            
-            # Output layer maps to num_classes (logits)
+
             nn.Linear(64, num_classes)
         )
 
