@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, balanced_accuracy_score, precision_recall_fscore_support
 
 def evaluate_classifier(model, test_loader, model_path, source_csv_test, y_test, gaze_test, person_ids_test, hyperparameters, grid_rows=3, grid_cols=3):
     os.makedirs('plot', exist_ok=True)
@@ -48,10 +48,23 @@ def evaluate_classifier(model, test_loader, model_path, source_csv_test, y_test,
         print(f"\n--- Evaluating Classifier for Person: {person_id} ---")
 
         accuracy = accuracy_score(person_labels, person_preds)
+        balanced_acc = balanced_accuracy_score(person_labels, person_preds)
+
+        # precision, recall, f1
+        precision_macro, recall_macro, f1_macro, _ = precision_recall_fscore_support(
+            person_labels,
+            person_preds,
+            labels=np.arange(grid_rows * grid_cols),
+            average="macro",
+            zero_division=0,
+        )
+
         cm = confusion_matrix(person_labels, person_preds, labels=np.arange(grid_rows * grid_cols))
-        
+
         print(f"Test Accuracy: {accuracy:.4f}")
-        
+        print(f"Balanced Accuracy: {balanced_acc:.4f}")
+        print(f"Macro F1: {f1_macro:.4f}")
+
         run_summary = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "model_name": type(model).__name__,
@@ -59,8 +72,12 @@ def evaluate_classifier(model, test_loader, model_path, source_csv_test, y_test,
             "hyperparameters": hyperparameters,
             "metrics": {
                 "accuracy": float(accuracy),
+                "balanced_accuracy": float(balanced_acc),
+                "precision_macro": float(precision_macro),
+                "recall_macro": float(recall_macro),
+                "f1_macro": float(f1_macro),
             },
-            "confusion_matrix": cm.tolist()
+            "confusion_matrix": cm.tolist(),
         }
         
         plot_dir = f'plot/{person_id}'
