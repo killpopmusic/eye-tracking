@@ -8,25 +8,28 @@ from src.train import train_classifier
 from src.evaluate import evaluate_classifier
 from src.utils.h5_data_loader import get_h5_data_loaders
 from src.models.gaze_classifier import GazeClassifier
+from src.models.gaze_res_mlp import GazeResMLP
+
 
 def main():
     parser = argparse.ArgumentParser(description="Gaze Classification Model Training and Evaluation")
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'evaluate'], help='Mode to run the script in.')
     parser.add_argument('--model_name', type=str, default='GazeClassifier', help='Name of the model class to use.')
     parser.add_argument('--data_path', type=str, default='data/HybridGaze.h5', help='Path to the training/evaluation data.')
-    parser.add_argument('--epochs', type=int, default=500, help='Number of training epochs.')
+    parser.add_argument('--epochs', type=int, default=30, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and validation.')
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
     parser.add_argument('--model_path', type=str, default='models/gaze_classifier.pth', help='Path to save or load the model.')
-    parser.add_argument('--grid_rows', type=int, default=3, help='Number of rows in the classification grid.')
-    parser.add_argument('--grid_cols', type=int, default=3, help='Number of columns in the classification grid.')
+    parser.add_argument('--grid_rows', type=int, default=1, help='Number of rows in the classification grid.')
+    parser.add_argument('--grid_cols', type=int, default=5, help='Number of columns in the classification grid.')
 
     args = parser.parse_args()
 
     num_classes = args.grid_rows * args.grid_cols
 
     model_map = {
-        'GazeClassifier': GazeClassifier
+        'GazeClassifier': GazeClassifier,
+        'GazeResMLP': GazeResMLP,
     }
     model_class = model_map.get(args.model_name)
     
@@ -39,8 +42,8 @@ def main():
     with h5py.File(args.data_path, 'r') as f:
         all_person_ids = np.unique([pid.decode('utf-8') for pid in f['data']['person_id'][:]])
 
-    train_person_ids = all_person_ids[[0,2,4,5,6,7,8,9,10,11,12,13,14]]
-    test_person_ids = all_person_ids[[1,3]]
+    train_person_ids = all_person_ids[[0,2,3,4,5,6,7,8,9,10,11,12,13,14]]
+    test_person_ids = all_person_ids[[1]]
 
     hyperparameters = {
         "epochs": args.epochs, 
