@@ -27,9 +27,10 @@ def get_h5_data_loaders(
     batch_size=32,
     train_person_ids=None,
     test_person_ids=None,
-    normalization_mode: str = "full",
+    normalization_mode: str = "center_scale",
     grid_rows: int = 3,
-    grid_cols: int = 3
+    grid_cols: int = 3,
+    calibration_split: float = 0.2,
 ):
 
     KEY_LANDMARK_INDICES = [
@@ -45,10 +46,10 @@ def get_h5_data_loaders(
         473, 474, 475, 476, 477,
 
         # Right eyebrow
-       # 70, 46, 53, 52, 65, 55, 107, 66, 105, 63,
+       # 107, 55, 108, #70, 46, 53, 52, 65, 55, 107, 66, 105, 63,
 
         # Left eyebrow
-       # 336, 285, 295, 282, 283, 276, 300, 293, 334, 296,
+       # 336, 285, 337, #295, 282, 283, 276, 300, 293, 334, 296,
 
         # Right upper eyelid
         124, 113, 247, 30, 29, 27, 28, 56, 190, 189, 221, 222, 223, 224, 225,
@@ -63,7 +64,7 @@ def get_h5_data_loaders(
         464, 465, 453, 452, 451, 450, 449, 448, 261, 446, 359, 255, 339, 254, 253, 252, 256, 341,
 
         #Nose 
-        19, 1, 4, 5, 195, 197, 6, 196,# 122, 188, 114, 217, 126, 209, 49, 48, 64, 237, 44, 35, 274, 309, 392, 294, 279, 429, 355, 437, 343, 412, 357, 351,
+         1, 4, 5, 195, 197, 6, 168, 8, 9, #19, 196, 122, 188, 114, 217, 126, 209, 49, 48, 64, 237, 44, 35, 274, 309, 392, 294, 279, 429, 355, 437, 343, 412, 357, 351,
 
         #Chin 
         152,  175, 428, 199, 208, 138#,135, 169, 170, 140, 171, 396, 369, 394, 364, 367
@@ -159,8 +160,8 @@ def get_h5_data_loaders(
         ref = reference_frames.get(person_id, global_mean)
         X_test_delta[i] = X_test[i] - ref
 
-    X_train_val = X_train_val_delta
-    X_test = X_test_delta
+    #X_train_val = X_train_val_delta
+   # X_test = X_test_delta
     # --- End of Delta Feature Calculation (no data leakage) ---
 
     # train/val split (GroupShuffleSplit na już przekształconym X_train_val)
@@ -174,6 +175,7 @@ def get_h5_data_loaders(
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_val_scaled = scaler.transform(X_val_raw)
     X_test_scaled = scaler.transform(X_test)
+
     joblib.dump(scaler, 'scaler.pkl')
     print("Scaler for X saved to scaler.pkl")
 
@@ -181,6 +183,7 @@ def get_h5_data_loaders(
     y_train_scaled = y_train_raw
     y_val_scaled = y_val_raw
     y_test_scaled = y_test
+
 
     # For classification, labels must be LongTensor
     y_train = torch.tensor(y_train_scaled, dtype=torch.long)
@@ -191,6 +194,7 @@ def get_h5_data_loaders(
     X_val = torch.tensor(X_val_scaled, dtype=torch.float32)
     X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
 
+
     train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(TensorDataset(X_test_tensor, y_test_tensor), batch_size=batch_size, shuffle=False)
@@ -198,6 +202,6 @@ def get_h5_data_loaders(
     input_dim = X_train.shape[1]
     print(f"Train/Val dataset: {len(X_train)} training samples, {len(X_val)} validation samples")
     print(f"Test dataset: {len(X_test_tensor)} test samples")
-    
+
     return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test
 
