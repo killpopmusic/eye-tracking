@@ -19,7 +19,7 @@ def normalize_landmarks(
   """
 
   if stable_indices is None:
-    stable_indices = [1, 6, 152, 10, 9]
+    stable_indices = [ 8] #[33, 133, 362, 263, 1, 4] #fuck knows which one 
 
   landmarks_xy = landmarks[:, :, :2]
 
@@ -37,7 +37,7 @@ def normalize_landmarks(
     eye_dist = np.linalg.norm(eye_vec, axis=1, keepdims=True)
     eye_dist[eye_dist < 1e-8] = 1e-8
 
-    # Orientation from instantaneous eye vector (no temporal smoothing)
+    # Orientation from instantaneous eye vector 
     cos_t_all = eye_vec[:, 0:1] / eye_dist
     sin_t_all = eye_vec[:, 1:2] / eye_dist
 
