@@ -2,6 +2,7 @@ import h5py
 import numpy as np
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from sklearn.preprocessing import RobustScaler
+from sklearn.utils.class_weight import compute_class_weight
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 import joblib
@@ -22,15 +23,11 @@ data/ --> main group
 ├── source_csv  
 └── timestamps
 '''
-def get_h5_data_loaders(
+def _prepare_h5_data(
     data_path,
-    batch_size=32,
-    train_person_ids=None,
-    test_person_ids=None,
-    normalization_mode: str = "center_scale",
-    grid_rows: int = 3,
-    grid_cols: int = 3,
-    calibration_split: float = 0.2,
+    normalization_mode: str = "raw",
+    grid_rows: int = 1,
+    grid_cols: int = 5,
 ):
 
     KEY_LANDMARK_INDICES = [
@@ -105,7 +102,7 @@ def get_h5_data_loaders(
 
     landmarks_normalized = normalize_landmarks(landmarks_valid,KEY_LANDMARK_INDICES, mode=normalization_mode)
 
-    # Use eyetracker gaze as training target
+    # TARGET SPECIFICATION:
     gaze_pixels = np.stack((all_gaze_x[valid_indices], all_gaze_y[valid_indices]), axis=-1)
     
     gx = np.clip(gaze_pixels[:, 0], 0, SCREEN_W - 1e-3)
@@ -127,6 +124,49 @@ def get_h5_data_loaders(
     
     X = landmarks_normalized.reshape(landmarks_normalized.shape[0], -1)
 
+    return X, y, gaze_ground_truth, person_ids_valid, source_csv_valid
+
+
+def _build_reference_frames(X_train_val, person_ids_train_val):
+    """Compute per-person reference frames (mean feature vector)."""
+    reference_frames = {}
+    unique_person_ids_for_ref = np.unique(person_ids_train_val)
+    for person_id in unique_person_ids_for_ref:
+        person_mask = person_ids_train_val == person_id
+        person_landmarks = X_train_val[person_mask]
+        reference_frames[person_id] = person_landmarks.mean(axis=0)
+    return reference_frames
+
+
+def _apply_reference_frames(X, person_ids, reference_frames, global_mean=None):
+    if global_mean is None:
+        global_mean = X.mean(axis=0)
+    X_delta = np.empty_like(X)
+    for i in range(X.shape[0]):
+        pid = person_ids[i]
+        ref = reference_frames.get(pid, global_mean)
+        X_delta[i] = X[i] - ref
+    return X_delta
+
+
+def get_h5_data_loaders(
+    data_path,
+    batch_size=32,
+    train_person_ids=None,
+    test_person_ids=None,
+    normalization_mode: str = "center_scale",
+    grid_rows: int = 3,
+    grid_cols: int = 3,
+    calibration_split: float = 0.2,
+):
+
+    X, y, gaze_ground_truth, person_ids_valid, source_csv_valid = _prepare_h5_data(
+        data_path=data_path,
+        normalization_mode=normalization_mode,
+        grid_rows=grid_rows,
+        grid_cols=grid_cols,
+    )
+
     # split data into patients (train/test split by person)
     train_indices = np.where(np.isin(person_ids_valid, train_person_ids))[0]
     test_indices = np.where(np.isin(person_ids_valid, test_person_ids))[0]
@@ -140,38 +180,24 @@ def get_h5_data_loaders(
     person_ids_test = person_ids_valid[test_indices]
 
     person_ids_train_val = person_ids_valid[train_indices]
-    reference_frames = {}
-    unique_person_ids_for_ref = np.unique(person_ids_train_val)
-    for person_id in unique_person_ids_for_ref:
-        person_mask = person_ids_train_val == person_id
-        person_landmarks = X_train_val[person_mask]
-        reference_frames[person_id] = person_landmarks.mean(axis=0)
 
-    X_train_val_delta = np.empty_like(X_train_val)
-    for i in range(X_train_val.shape[0]):
-        person_id = person_ids_train_val[i]
-        X_train_val_delta[i] = X_train_val[i] - reference_frames[person_id]
+    # Delta features with per-person reference frames (no leakage across train/test)
+    reference_frames = _build_reference_frames(X_train_val, person_ids_train_val)
 
+    X_train_val_delta = _apply_reference_frames(X_train_val, person_ids_train_val, reference_frames)
     global_mean = X_train_val.mean(axis=0)
-
-    X_test_delta = np.empty_like(X_test)
-    for i in range(X_test.shape[0]):
-        person_id = person_ids_test[i]
-        ref = reference_frames.get(person_id, global_mean)
-        X_test_delta[i] = X_test[i] - ref
+    X_test_delta = _apply_reference_frames(X_test, person_ids_test, reference_frames, global_mean=global_mean)
 
     #X_train_val = X_train_val_delta
-   # X_test = X_test_delta
-    # --- End of Delta Feature Calculation (no data leakage) ---
+    #X_test = X_test_delta
 
-    # train/val split (GroupShuffleSplit na już przekształconym X_train_val)
     gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
     train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_train_val))
     X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
     X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
 
     # Scale features
-    scaler = RobustScaler() #switched to robust scaler to reduce outlier impact
+    scaler = RobustScaler() #switched from standard to robust scaler to reduce outlier impact
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_val_scaled = scaler.transform(X_val_raw)
     X_test_scaled = scaler.transform(X_test)
@@ -184,8 +210,6 @@ def get_h5_data_loaders(
     y_val_scaled = y_val_raw
     y_test_scaled = y_test
 
-
-    # For classification, labels must be LongTensor
     y_train = torch.tensor(y_train_scaled, dtype=torch.long)
     y_val = torch.tensor(y_val_scaled, dtype=torch.long)
     y_test_tensor = torch.tensor(y_test_scaled, dtype=torch.long)
@@ -194,6 +218,22 @@ def get_h5_data_loaders(
     X_val = torch.tensor(X_val_scaled, dtype=torch.float32)
     X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
 
+    unique_classes, class_counts = np.unique(y_train_scaled, return_counts=True)
+    total_train_samples = len(y_train_scaled)
+    print("Class distribution in training set:")
+    for cls, cnt in zip(unique_classes, class_counts):
+        print(f"  class {cls}: {cnt} samples ({cnt / total_train_samples * 100:.2f}%)")
+
+    class_weights = compute_class_weight(
+        class_weight="balanced",
+        classes=unique_classes,
+        y=y_train_scaled,
+    )
+
+    max_class = unique_classes.max()
+    weight_tensor = torch.ones(max_class + 1, dtype=torch.float32)
+    for cls, w in zip(unique_classes, class_weights):
+        weight_tensor[int(cls)] = float(w)
 
     train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
@@ -203,5 +243,5 @@ def get_h5_data_loaders(
     print(f"Train/Val dataset: {len(X_train)} training samples, {len(X_val)} validation samples")
     print(f"Test dataset: {len(X_test_tensor)} test samples")
 
-    return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test
+    return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test, weight_tensor
 

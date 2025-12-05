@@ -7,7 +7,19 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import accuracy_score, confusion_matrix, balanced_accuracy_score, precision_recall_fscore_support
 
-def evaluate_classifier(model, test_loader, model_path, source_csv_test, y_test, gaze_test, person_ids_test, hyperparameters, grid_rows=3, grid_cols=3):
+
+def evaluate_classifier(
+    model,
+    test_loader,
+    model_path,
+    source_csv_test,
+    y_test,
+    gaze_test,
+    person_ids_test,
+    hyperparameters,
+    grid_rows: int = 3,
+    grid_cols: int = 3,
+):
     os.makedirs('plot', exist_ok=True)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     os.makedirs('experiments', exist_ok=True)
@@ -40,6 +52,8 @@ def evaluate_classifier(model, test_loader, model_path, source_csv_test, y_test,
 
     unique_person_ids = np.unique(person_ids_test)
 
+    per_person_results = []
+
     for person_id in unique_person_ids:
         person_mask = person_ids_test == person_id
         person_labels = all_labels[person_mask]
@@ -65,20 +79,18 @@ def evaluate_classifier(model, test_loader, model_path, source_csv_test, y_test,
         print(f"Balanced Accuracy: {balanced_acc:.4f}")
         print(f"Macro F1: {f1_macro:.4f}")
 
-        run_summary = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "model_name": type(model).__name__,
-            "person_id": person_id,
-            "hyperparameters": hyperparameters,
-            "metrics": {
-                "accuracy": float(accuracy),
-                "balanced_accuracy": float(balanced_acc),
-                "precision_macro": float(precision_macro),
-                "recall_macro": float(recall_macro),
-                "f1_macro": float(f1_macro),
-            },
-            "confusion_matrix": cm.tolist(),
-        }
+        per_person_results.append(
+            {
+                "person_id": person_id,
+                "metrics": {
+                    "accuracy": float(accuracy),
+                    "balanced_accuracy": float(balanced_acc),
+                    "precision_macro": float(precision_macro),
+                    "recall_macro": float(recall_macro),
+                    "f1_macro": float(f1_macro),
+                },
+            }
+        )
         
         plot_dir = f'plot/{person_id}'
         os.makedirs(plot_dir, exist_ok=True)
@@ -93,10 +105,5 @@ def evaluate_classifier(model, test_loader, model_path, source_csv_test, y_test,
         print(f"Confusion matrix for person {person_id} saved to {cm_path}")
         plt.close()
 
-        run_file = os.path.join('experiments', f"run_classifier_{person_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
-        try:
-            with open(run_file, 'w') as f:
-                json.dump(run_summary, f, indent=2)
-            print(f"Test run summary for {person_id} saved to {run_file}")
-        except Exception as e:
-            print(f"Failed to save test run summary JSON for {person_id}: {e}")
+
+    return per_person_results

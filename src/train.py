@@ -9,10 +9,14 @@ import numpy as np
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path, patience=30):
+
+def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path, patience=30, class_weights=None):
     model.to(device)
-    # Label Smoothing & AdamW & Mixed Precision
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.2)
+
+    if class_weights is not None:
+        class_weights = class_weights.to(device)
+        print("Using class weights in CrossEntropyLoss:", class_weights.detach().cpu().numpy())
+    loss_fn = nn.CrossEntropyLoss( )#label_smoothing=0.2, weight=class_weights
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=10)
     scaler = GradScaler(enabled=(device == 'cuda'))
