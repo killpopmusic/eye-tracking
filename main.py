@@ -12,19 +12,20 @@ from src.evaluate import evaluate_classifier
 from src.utils.h5_data_loader import get_h5_data_loaders, _prepare_h5_data
 from src.models.gaze_classifier import GazeClassifier
 from src.models.gaze_res_mlp import GazeResMLP
+from src.models.gaze_classifier_min import GazeClassifierMin
 
 
 def main():
     parser = argparse.ArgumentParser(description="Gaze Classification Model Training and Evaluation")
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'evaluate'], help='Mode to run the script in.')
-    parser.add_argument('--model_name', type=str, default='GazeResMLP', help='Name of the model class to use.')
+    parser.add_argument('--model_name', type=str, default='GazeClassifier', help='Name of the model class to use.')
     parser.add_argument('--data_path', type=str, default='data/HybridGaze.h5', help='Path to the training/evaluation data.')
     parser.add_argument('--epochs', type=int, default=30, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and validation.')
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
-    parser.add_argument('--model_path', type=str, default='models/gaze_res_mlp.pth', help='Path to save or load the model.')
-    parser.add_argument('--grid_rows', type=int, default=3, help='Number of rows in the classification grid.')
-    parser.add_argument('--grid_cols', type=int, default=3, help='Number of columns in the classification grid.')
+    parser.add_argument('--model_path', type=str, default='models/gaze_classifier.pth', help='Path to save or load the model.')
+    parser.add_argument('--grid_rows', type=int, default=1, help='Number of rows in the classification grid.')
+    parser.add_argument('--grid_cols', type=int, default=5, help='Number of columns in the classification grid.')
 
     args = parser.parse_args()
 
@@ -33,6 +34,7 @@ def main():
     model_map = {
         'GazeClassifier': GazeClassifier,
         'GazeResMLP': GazeResMLP,
+        'GazeClassifierMin': GazeClassifierMin,
     }
     model_class = model_map.get(args.model_name)
     
@@ -123,7 +125,6 @@ def main():
                 grid_cols=args.grid_cols,
             )
 
-            # dodajemy wyniki z tego folda do globalnej listy
             all_person_results.extend(fold_results)
 
     excluded_for_aggregate =  ['2025_06_02_11_09_16', '2025_05_27_10_57_49', '2025_06_07_22_33_55']
