@@ -1,12 +1,74 @@
 import h5py
 import numpy as np
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import RobustScaler, StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 import joblib
 from .landmark_normalization import normalize_landmarks
+from .augmentation import augment_mirror_data
+
+KEY_LANDMARK_INDICES = [
+    # Right eye
+    33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246,
+    
+    # Right iris
+    468, 469, 470, 471, 472,
+
+    # Left eye
+    362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398,
+    # Left iris
+    473, 474, 475, 476, 477,
+
+    # Right eyebrow
+    # 107, 55, 108, #70, 46, 53, 52, 65, 55, 107, 66, 105, 63,
+
+    # Left eyebrow
+    # 336, 285, 337, #295, 282, 283, 276, 300, 293, 334, 296,
+
+    # Right upper eyelid
+    124, 113, 247, 30, 29, 27, 28, 56, 190, 189, 221, 222, 223, 224, 225,
+
+    # Right lower eyelid 
+    130, 226, 31, 228, 229, 230, 231, 232, 233, 245, 244, 112, 26, 22, 23, 24, 110, 25,243,
+
+    #Left upper eyelid 
+    413, 414, 286, 258, 257, 259, 260, 467, 342, 353, 445, 444, 443, 442, 441,
+
+    # Left lower eyelid 
+    464, 465, 453, 452, 451, 450, 449, 448, 261, 446, 359, 255, 339, 254, 253, 252, 256, 341,
+
+    #Nose 
+    1, 4, 5, 195, 197, 6, 168, 8, 9, #19, 196, 122, 188, 114, 217, 126, 209, 49, 48, 64, 237, 44, 35, 274, 309, 392, 294, 279, 429, 355, 437, 343, 412, 357, 351,
+
+    #Chin 
+    152,  175, 428, 199, 208#, 138#,135, 169, 170, 140, 171, 396, 369, 394, 364, 367
+
+]
+
+SYMMETRY_PAIRS = { #LEFT: RIGHT
+    # Eyes
+    33: 263, 7: 249, 163: 390, 144: 373, 145: 374, 153: 380, 154: 381, 155: 382,
+    133: 362, 173: 398, 157: 384, 158: 385, 159: 386, 160: 387, 161: 388, 246: 466, #OK
+
+    # Irises
+    468: 473, 471: 474, 470: 475, 469: 476, 472: 477, #OK
+
+    # Upper Eyelid
+    124: 353, 113: 342, 247: 467, 30: 260, 29: 259, 27: 257, 28: 258, 56: 286,
+    190: 414, 189: 413, 221: 441, 222: 442, 223: 443, 224: 444, 225: 445, #OK
+
+    # Lower Eyelid
+    130: 359, 226: 446, 31: 261, 228: 448, 229: 449, 230: 450, 231: 451, 232: 452,
+    233: 453, 245: 465, 244: 464, 112: 341, 26: 256, 22: 252, 23: 253, 24: 254,
+    110: 339, 25: 255,
+
+    #Chin
+    208:428
+
+
+}
 
 '''
 H5 structure:
@@ -29,44 +91,6 @@ def _prepare_h5_data(
     grid_rows: int = 1,
     grid_cols: int = 5,
 ):
-
-    KEY_LANDMARK_INDICES = [
-        # Right eye
-        33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246,
-        
-        # Right iris
-        468, 469, 470, 471, 472,
-
-        # Left eye
-        362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398,
-        # Left iris
-        473, 474, 475, 476, 477,
-
-        # Right eyebrow
-       # 107, 55, 108, #70, 46, 53, 52, 65, 55, 107, 66, 105, 63,
-
-        # Left eyebrow
-       # 336, 285, 337, #295, 282, 283, 276, 300, 293, 334, 296,
-
-        # Right upper eyelid
-        124, 113, 247, 30, 29, 27, 28, 56, 190, 189, 221, 222, 223, 224, 225,
-
-        # Right lower eyelid 
-        130, 226, 31, 228, 229, 230, 231, 232, 233, 245, 244, 112, 26, 22, 23, 24, 110, 25,
-
-        #Left upper eyelid 
-        413, 414, 286, 258, 257, 259, 260, 467, 342, 353, 445, 444, 443, 442, 441,
-
-        # Left lower eyelid 
-        464, 465, 453, 452, 451, 450, 449, 448, 261, 446, 359, 255, 339, 254, 253, 252, 256, 341,
-
-        #Nose 
-         1, 4, 5, 195, 197, 6, 168, 8, 9, #19, 196, 122, 188, 114, 217, 126, 209, 49, 48, 64, 237, 44, 35, 274, 309, 392, 294, 279, 429, 355, 437, 343, 412, 357, 351,
-
-        #Chin 
-        152,  175, 428, 199, 208, 138#,135, 169, 170, 140, 171, 396, 369, 394, 364, 367
-
-    ]
 
     with h5py.File(data_path, 'r') as f:
         data_group = f['data']
@@ -154,10 +178,9 @@ def get_h5_data_loaders(
     batch_size=32,
     train_person_ids=None,
     test_person_ids=None,
-    normalization_mode: str = "center_scale",
+    normalization_mode: str = "raw",
     grid_rows: int = 3,
     grid_cols: int = 3,
-    calibration_split: float = 0.2,
 ):
 
     X, y, gaze_ground_truth, person_ids_valid, source_csv_valid = _prepare_h5_data(
@@ -181,7 +204,28 @@ def get_h5_data_loaders(
 
     person_ids_train_val = person_ids_valid[train_indices]
 
-    # Delta features with per-person reference frames (no leakage across train/test)
+    # --- Augmentation (Mirroring) ---
+
+    print(f"Augmenting training data (mirroring)... Original size: {len(X_train_val)}")
+    X_mirrored, y_mirrored = augment_mirror_data(
+        X_train_val, 
+        y_train_val, 
+        grid_cols, 
+        grid_rows, 
+        KEY_LANDMARK_INDICES, 
+        SYMMETRY_PAIRS
+    )
+    
+    # X_train_val = np.concatenate([X_train_val, X_mirrored], axis=0)
+    # y_train_val = np.concatenate([y_train_val, y_mirrored], axis=0)
+    
+    # Duplicate person_ids for the mirrored data so they stay in the same fold
+    # person_ids_train_val = np.concatenate([person_ids_train_val, person_ids_train_val], axis=0)
+    
+    print(f"Augmentation done. New size: {len(X_train_val)}")
+    # --------------------------------
+
+    # Delta features (not used))
     reference_frames = _build_reference_frames(X_train_val, person_ids_train_val)
 
     X_train_val_delta = _apply_reference_frames(X_train_val, person_ids_train_val, reference_frames)
@@ -203,10 +247,9 @@ def get_h5_data_loaders(
     X_test_scaled = scaler.transform(X_test)
 
     joblib.dump(scaler, 'scaler.pkl')
-    print("Scaler for X saved to scaler.pkl")
+    # print("Scaler for X saved to scaler.pkl")
 
-
-    y_train_scaled = y_train_raw
+    y_train_scaled = y_train_raw #for classification, no scaling
     y_val_scaled = y_val_raw
     y_test_scaled = y_test
 
