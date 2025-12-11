@@ -17,10 +17,10 @@ from src.models.gaze_classifier_min import GazeClassifierMin
 
 def main():
     parser = argparse.ArgumentParser(description="Gaze Classification Model Training and Evaluation")
-    parser.add_argument('--mode', type=str, default='train', choices=['train', 'evaluate'], help='Mode to run the script in.')
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'evaluate', 'train_final'], help='Mode to run the script in.')
     parser.add_argument('--model_name', type=str, default='GazeClassifier', help='Name of the model class to use.')
     parser.add_argument('--data_path', type=str, default='data/HybridGaze.h5', help='Path to the training/evaluation data.')
-    parser.add_argument('--epochs', type=int, default=30, help='Number of training epochs.')
+    parser.add_argument('--epochs', type=int, default=25, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and validation.')
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
     parser.add_argument('--model_path', type=str, default='models/gaze_classifier.pth', help='Path to save or load the model.')
@@ -59,6 +59,55 @@ def main():
         "learning_rate": args.lr,
         "grid_size": f"{args.grid_rows}x{args.grid_cols}"
     }
+
+    if args.mode == 'train_final':
+        print("\n===== Final Training on ALL Subjects =====")
+        
+        # Use all subjects for training
+        train_person_ids = all_person_ids
+        test_person_ids = np.array([]) # No test subjects
+
+        os.makedirs('trained_models', exist_ok=True)
+        scaler_save_path = os.path.join('trained_models', 'production_scaler.pkl')
+
+        data_loader_params = {
+            'data_path': args.data_path,
+            'batch_size': args.batch_size,
+            'train_person_ids': train_person_ids,
+            'test_person_ids': test_person_ids,
+            'grid_rows': args.grid_rows,
+            'grid_cols': args.grid_cols,
+            'mode': 'final',
+            'scaler_path': scaler_save_path
+        }
+        
+        (
+            train_loader,
+            val_loader,
+            _, # test_loader is empty
+            input_features,
+            _, _, _, _, # unused test data
+            class_weights,
+        ) = get_h5_data_loaders(**data_loader_params)
+
+        model = model_class(input_features, num_classes=num_classes).to(device)
+        
+        # Save to a distinct final path
+        final_model_path = os.path.join('trained_models', 'final_model.pth')
+
+        train_classifier(
+            model,
+            train_loader,
+            val_loader,
+            num_epochs=args.epochs,
+            lr=args.lr,
+            model_path=final_model_path,
+            class_weights=class_weights,
+            patience=args.epochs #  disable early stopping
+        )
+        print(f"Final model saved to {final_model_path}")
+        print(f"Scaler saved to {scaler_save_path}")
+        return
 
     all_person_results = []
 

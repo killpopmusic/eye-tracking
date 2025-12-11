@@ -154,10 +154,12 @@ def get_h5_data_loaders(
     batch_size=32,
     train_person_ids=None,
     test_person_ids=None,
-    normalization_mode: str = "center_scale",
+    normalization_mode: str = "raw",
     grid_rows: int = 3,
     grid_cols: int = 3,
     calibration_split: float = 0.2,
+    mode: str = "loso",
+    scaler_path: str = "scaler.pkl",
 ):
 
     X, y, gaze_ground_truth, person_ids_valid, source_csv_valid = _prepare_h5_data(
@@ -186,24 +188,43 @@ def get_h5_data_loaders(
 
     X_train_val_delta = _apply_reference_frames(X_train_val, person_ids_train_val, reference_frames)
     global_mean = X_train_val.mean(axis=0)
-    X_test_delta = _apply_reference_frames(X_test, person_ids_test, reference_frames, global_mean=global_mean)
+    
+    if len(X_test) > 0:
+        X_test_delta = _apply_reference_frames(X_test, person_ids_test, reference_frames, global_mean=global_mean)
+    else:
+        X_test_delta = np.empty((0, X_train_val.shape[1]))
 
     #X_train_val = X_train_val_delta
     #X_test = X_test_delta
 
-    gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
-    train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_train_val))
-    X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
-    X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
+    if mode == 'final':
+        gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
+        train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_train_val))
+        X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
+        X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
+
+       # X_train_raw, X_val_raw, y_train_raw, y_val_raw = train_test_split(
+       #     X_train_val, y_train_val, test_size=0.1, random_state=42, stratify=y_train_val
+       # )
+    else:
+        # LOSO
+        gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
+        train_idx, val_idx = next(gss.split(X_train_val, y_train_val, groups=person_ids_train_val))
+        X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
+        X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
 
     # Scale features
     scaler = RobustScaler() #switched from standard to robust scaler to reduce outlier impact
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_val_scaled = scaler.transform(X_val_raw)
-    X_test_scaled = scaler.transform(X_test)
+    
+    if len(X_test_delta) > 0:
+        X_test_scaled = scaler.transform(X_test)
+    else:
+        X_test_scaled = np.empty((0, X_train_scaled.shape[1]))
 
-    joblib.dump(scaler, 'scaler.pkl')
-    print("Scaler for X saved to scaler.pkl")
+    joblib.dump(scaler, scaler_path)
+    print(f"Scaler for X saved to {scaler_path}")
 
 
     y_train_scaled = y_train_raw
