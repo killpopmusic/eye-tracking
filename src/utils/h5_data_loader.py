@@ -2,7 +2,6 @@ import h5py
 import numpy as np
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from sklearn.preprocessing import RobustScaler
-from sklearn.utils.class_weight import compute_class_weight
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 import joblib
@@ -23,11 +22,10 @@ data/ --> main group
 ├── source_csv  
 └── timestamps
 '''
-def _prepare_h5_data(
+def _prepare_h5_data_regression(
     data_path,
-    grid_rows: int,
-    grid_cols: int,
     normalization_mode: str = "raw",
+    target_space: str = "normalized",
 ):
 
     KEY_LANDMARK_INDICES = [
@@ -98,20 +96,16 @@ def _prepare_h5_data(
 
     landmarks_normalized = normalize_landmarks(landmarks_valid,KEY_LANDMARK_INDICES, mode=normalization_mode)
 
-    # TARGET SPECIFICATION (markers/gaze_points):
+    # TARGET SPECIFICATION (Regression):
     gaze_pixels = np.stack((all_gaze_x[valid_indices], all_gaze_y[valid_indices]), axis=-1)
     
     gx = np.clip(gaze_pixels[:, 0], 0, SCREEN_W - 1e-3)
     gy = np.clip(gaze_pixels[:, 1], 0, SCREEN_H - 1e-3)
     
-    col_width = SCREEN_W / grid_cols
-    row_height = SCREEN_H / grid_rows
-    
-    col_indices = (gx // col_width).astype(np.int64)
-    row_indices = (gy // row_height).astype(np.int64)
-    
-    # Class ID = row * num_cols + col
-    y = row_indices * grid_cols + col_indices
+    if target_space == "normalized":
+        y_reg = np.stack((gx / SCREEN_W, gy / SCREEN_H), axis=-1).astype(np.float32)
+    else:
+        y_reg = np.stack((gx, gy), axis=-1).astype(np.float32)
 
     # Keep pixel-space ground truth for evaluation/plots
     gaze_ground_truth = gaze_pixels
@@ -120,34 +114,31 @@ def _prepare_h5_data(
     
     X = landmarks_normalized.reshape(landmarks_normalized.shape[0], -1)
 
-    return X, y, gaze_ground_truth, person_ids_valid, source_csv_valid
+    return X, y_reg, gaze_ground_truth, person_ids_valid, source_csv_valid
 
-def get_h5_data_loaders(
+def get_h5_data_loaders_regression(
     data_path,
-    grid_rows: int,
-    grid_cols: int,
     batch_size=32,
     train_person_ids=None,
     test_person_ids=None,
     normalization_mode: str = "raw",
-    calibration_split: float = 0.2,
+    target_space: str = "normalized",
     mode: str = "loso",
     scaler_path: str = "scaler.pkl",
 ):
 
-    X, y, gaze_ground_truth, person_ids_valid, source_csv_valid = _prepare_h5_data(
+    X, y_reg, gaze_ground_truth, person_ids_valid, source_csv_valid = _prepare_h5_data_regression(
         data_path=data_path,
         normalization_mode=normalization_mode,
-        grid_rows=grid_rows,
-        grid_cols=grid_cols,
+        target_space=target_space,
     )
 
     # split data into subjects (train/test split by person)
     train_indices = np.where(np.isin(person_ids_valid, train_person_ids))[0]
     test_indices = np.where(np.isin(person_ids_valid, test_person_ids))[0]
 
-    X_train_val, y_train_val = X[train_indices], y[train_indices]
-    X_test, y_test = X[test_indices], y[test_indices]
+    X_train_val, y_train_val = X[train_indices], y_reg[train_indices]
+    X_test, y_test = X[test_indices], y_reg[test_indices]
     gaze_test = gaze_ground_truth[test_indices]
     
     # data needed to visualize each person later on 
@@ -173,7 +164,7 @@ def get_h5_data_loaders(
         X_train_raw, y_train_raw = X_train_val[train_idx], y_train_val[train_idx]
         X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
 
-    # Scale features
+    # Scale features (X only)
     scaler = RobustScaler() #switched from standard to robust scaler to reduce outlier impact
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_val_scaled = scaler.transform(X_val_raw)
@@ -182,34 +173,14 @@ def get_h5_data_loaders(
     joblib.dump(scaler, scaler_path)
     print(f"Scaler for X saved to {scaler_path}")
 
-    y_train_scaled = y_train_raw
-    y_val_scaled = y_val_raw
-    y_test_scaled = y_test
-
-    y_train = torch.tensor(y_train_scaled, dtype=torch.long)
-    y_val = torch.tensor(y_val_scaled, dtype=torch.long)
-    y_test_tensor = torch.tensor(y_test_scaled, dtype=torch.long)
+    # Targets remain unscaled (normalized or pixel space)
+    y_train = torch.tensor(y_train_raw, dtype=torch.float32)
+    y_val = torch.tensor(y_val_raw, dtype=torch.float32)
+    y_test_tensor = torch.tensor(y_test, dtype=torch.float32)
 
     X_train = torch.tensor(X_train_scaled, dtype=torch.float32)
     X_val = torch.tensor(X_val_scaled, dtype=torch.float32)
     X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
-
-    unique_classes, class_counts = np.unique(y_train_scaled, return_counts=True)
-    total_train_samples = len(y_train_scaled)
-    print("Class distribution in training set:")
-    for cls, cnt in zip(unique_classes, class_counts):
-        print(f"  class {cls}: {cnt} samples ({cnt / total_train_samples * 100:.2f}%)")
-
-    class_weights = compute_class_weight(
-        class_weight="balanced",
-        classes=unique_classes,
-        y=y_train_scaled,
-    )
-
-    max_class = unique_classes.max()
-    weight_tensor = torch.ones(max_class + 1, dtype=torch.float32)
-    for cls, w in zip(unique_classes, class_weights):
-        weight_tensor[int(cls)] = float(w)
 
     train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
@@ -219,5 +190,5 @@ def get_h5_data_loaders(
     print(f"Train/Val dataset: {len(X_train)} training samples, {len(X_val)} validation samples")
     print(f"Test dataset: {len(X_test_tensor)} test samples")
 
-    return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test, weight_tensor
+    return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test
 
