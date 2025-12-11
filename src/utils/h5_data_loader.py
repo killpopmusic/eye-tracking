@@ -25,9 +25,9 @@ data/ --> main group
 '''
 def _prepare_h5_data(
     data_path,
+    grid_rows: int,
+    grid_cols: int,
     normalization_mode: str = "raw",
-    grid_rows: int = 1,
-    grid_cols: int = 5,
 ):
 
     KEY_LANDMARK_INDICES = [
@@ -39,14 +39,9 @@ def _prepare_h5_data(
 
         # Left eye
         362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398,
+
         # Left iris
         473, 474, 475, 476, 477,
-
-        # Right eyebrow
-       # 107, 55, 108, #70, 46, 53, 52, 65, 55, 107, 66, 105, 63,
-
-        # Left eyebrow
-       # 336, 285, 337, #295, 282, 283, 276, 300, 293, 334, 296,
 
         # Right upper eyelid
         124, 113, 247, 30, 29, 27, 28, 56, 190, 189, 221, 222, 223, 224, 225,
@@ -80,6 +75,7 @@ def _prepare_h5_data(
         all_person_ids = np.array([pid.decode('utf-8') for pid in data_group['person_id'][:]])
         all_source_csv = np.array([x.decode('utf-8') for x in data_group['source_csv'][:]])
 
+    # Filter out calibration data
     calibration_mask = np.isin(all_source_csv, ['data_3x3.csv', 'data_5x5.csv', 'data_smooth.csv'])
     all_landmarks = all_landmarks[calibration_mask]
     all_marker_x = all_marker_x[calibration_mask]
@@ -102,7 +98,7 @@ def _prepare_h5_data(
 
     landmarks_normalized = normalize_landmarks(landmarks_valid,KEY_LANDMARK_INDICES, mode=normalization_mode)
 
-    # TARGET SPECIFICATION:
+    # TARGET SPECIFICATION (markers/gaze_points):
     gaze_pixels = np.stack((all_gaze_x[valid_indices], all_gaze_y[valid_indices]), axis=-1)
     
     gx = np.clip(gaze_pixels[:, 0], 0, SCREEN_W - 1e-3)
@@ -126,37 +122,14 @@ def _prepare_h5_data(
 
     return X, y, gaze_ground_truth, person_ids_valid, source_csv_valid
 
-
-def _build_reference_frames(X_train_val, person_ids_train_val):
-    """Compute per-person reference frames (mean feature vector)."""
-    reference_frames = {}
-    unique_person_ids_for_ref = np.unique(person_ids_train_val)
-    for person_id in unique_person_ids_for_ref:
-        person_mask = person_ids_train_val == person_id
-        person_landmarks = X_train_val[person_mask]
-        reference_frames[person_id] = person_landmarks.mean(axis=0)
-    return reference_frames
-
-
-def _apply_reference_frames(X, person_ids, reference_frames, global_mean=None):
-    if global_mean is None:
-        global_mean = X.mean(axis=0)
-    X_delta = np.empty_like(X)
-    for i in range(X.shape[0]):
-        pid = person_ids[i]
-        ref = reference_frames.get(pid, global_mean)
-        X_delta[i] = X[i] - ref
-    return X_delta
-
-
 def get_h5_data_loaders(
     data_path,
+    grid_rows: int,
+    grid_cols: int,
     batch_size=32,
     train_person_ids=None,
     test_person_ids=None,
     normalization_mode: str = "raw",
-    grid_rows: int = 3,
-    grid_cols: int = 3,
     calibration_split: float = 0.2,
     mode: str = "loso",
     scaler_path: str = "scaler.pkl",
@@ -169,7 +142,7 @@ def get_h5_data_loaders(
         grid_cols=grid_cols,
     )
 
-    # split data into patients (train/test split by person)
+    # split data into subjects (train/test split by person)
     train_indices = np.where(np.isin(person_ids_valid, train_person_ids))[0]
     test_indices = np.where(np.isin(person_ids_valid, test_person_ids))[0]
 
@@ -183,19 +156,6 @@ def get_h5_data_loaders(
 
     person_ids_train_val = person_ids_valid[train_indices]
 
-    # Delta features with per-person reference frames (no leakage across train/test)
-    reference_frames = _build_reference_frames(X_train_val, person_ids_train_val)
-
-    X_train_val_delta = _apply_reference_frames(X_train_val, person_ids_train_val, reference_frames)
-    global_mean = X_train_val.mean(axis=0)
-    
-    if len(X_test) > 0:
-        X_test_delta = _apply_reference_frames(X_test, person_ids_test, reference_frames, global_mean=global_mean)
-    else:
-        X_test_delta = np.empty((0, X_train_val.shape[1]))
-
-    #X_train_val = X_train_val_delta
-    #X_test = X_test_delta
 
     if mode == 'final':
         gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
@@ -217,15 +177,10 @@ def get_h5_data_loaders(
     scaler = RobustScaler() #switched from standard to robust scaler to reduce outlier impact
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_val_scaled = scaler.transform(X_val_raw)
-    
-    if len(X_test_delta) > 0:
-        X_test_scaled = scaler.transform(X_test)
-    else:
-        X_test_scaled = np.empty((0, X_train_scaled.shape[1]))
+    X_test_scaled = scaler.transform(X_test)
 
     joblib.dump(scaler, scaler_path)
     print(f"Scaler for X saved to {scaler_path}")
-
 
     y_train_scaled = y_train_raw
     y_val_scaled = y_val_raw

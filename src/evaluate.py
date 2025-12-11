@@ -17,8 +17,8 @@ def evaluate_classifier(
     gaze_test,
     person_ids_test,
     hyperparameters,
-    grid_rows: int = 3,
-    grid_cols: int = 3,
+    grid_rows: int,
+    grid_cols: int,
 ):
     os.makedirs('plot', exist_ok=True)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)

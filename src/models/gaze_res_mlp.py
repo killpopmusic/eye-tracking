@@ -2,10 +2,7 @@ import torch
 import torch.nn as nn
 
 class ResidualBlock(nn.Module):
-    """
-    Blok rezydualny z normalizacją LayerNorm i aktywacją GELU.
-    Pomaga w trenowaniu głębszych sieci poprzez zapobieganie zanikaniu gradientu.
-    """
+
     def __init__(self, hidden_dim, dropout_rate=0.3):
         super().__init__()
         self.block = nn.Sequential(
