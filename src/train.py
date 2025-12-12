@@ -139,3 +139,18 @@ def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path
         }
         torch.save(save_dict, model_path)
         print(f"Model saved to {model_path}")
+
+def fine_tune_model(model, train_loader, epochs=10, lr=0.00005):
+    device = next(model.parameters()).device
+    model.train()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    for _ in range(epochs):
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()

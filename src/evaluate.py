@@ -21,7 +21,8 @@ def evaluate_classifier(
     grid_cols: int,
 ):
     os.makedirs('plot', exist_ok=True)
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    if model_path:
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
     os.makedirs('experiments', exist_ok=True)
 
     if model_path and os.path.exists(model_path):

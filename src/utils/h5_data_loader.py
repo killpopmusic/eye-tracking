@@ -221,3 +221,38 @@ def get_h5_data_loaders(
 
     return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test, weight_tensor
 
+def split_calibration_data(X, y, source_csv, calibration_files=['data_3x3.csv'], calibration_fraction=1.0):
+    # Identify all potential calibration samples
+    is_calib_file = np.isin(source_csv, calibration_files)
+    
+    calib_indices = np.where(is_calib_file)[0]
+    eval_indices = np.where(~is_calib_file)[0]
+    
+    if calibration_fraction < 1.0 and len(calib_indices) > 0:
+        try:
+            # Stratified split to ensure all grid points are covered
+            selected_calib_idx, _ = train_test_split(
+                calib_indices, 
+                train_size=calibration_fraction, 
+                stratify=y[calib_indices],
+                random_state=42
+            )
+        except ValueError:
+            # Fallback if stratification fails
+            selected_calib_idx, _ = train_test_split(
+                calib_indices, 
+                train_size=calibration_fraction, 
+                random_state=42
+            )
+        
+        X_calib = X[selected_calib_idx]
+        y_calib = y[selected_calib_idx]
+    else:
+        X_calib = X[calib_indices]
+        y_calib = y[calib_indices]
+    
+    X_test = X[eval_indices]
+    y_test = y[eval_indices]
+    
+    return X_calib, y_calib, X_test, y_test, is_calib_file
+
