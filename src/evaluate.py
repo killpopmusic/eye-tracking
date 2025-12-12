@@ -103,16 +103,16 @@ def evaluate_regressor(
         if np.any(mask_3x3):
             plt.figure(figsize=(12, 8))
             plt.scatter(person_labels[mask_3x3, 0], person_labels[mask_3x3, 1],
-                        label='Actual Points (3x3)', alpha=0.6, s=100)
+                        label='Dane z Tobii 5', alpha=0.6, s=100)
             plt.scatter(person_preds[mask_3x3, 0], person_preds[mask_3x3, 1],
-                        label='Predicted Points (3x3)', alpha=0.6, s=100, c='r', marker='x')
+                        label='Predykcje modelu', alpha=0.6, s=100, c='r', marker='x')
             for i in np.where(mask_3x3)[0]:
                 plt.plot([person_labels[i, 0], person_preds[i, 0]],
                          [person_labels[i, 1], person_preds[i, 1]],
                          'k-', alpha=0.2)
-            plt.title(f'Test Set: Actual Gaze vs. Predicted Gaze (3x3) - Person {pid}')
-            plt.xlabel('X coordinate')
-            plt.ylabel('Y coordinate')
+            plt.title(f'Predykcje modelu na tle danych referencyjnych dla użytkownika: {pid}')
+            plt.xlabel('X')
+            plt.ylabel('Y ')
             plt.legend()
             plt.grid(True)
             plt.xlim(0, SCREEN_W)
@@ -128,16 +128,16 @@ def evaluate_regressor(
         if np.any(mask_5x5):
             plt.figure(figsize=(12, 8))
             plt.scatter(person_labels[mask_5x5, 0], person_labels[mask_5x5, 1],
-                        label='Actual Points (5x5)', alpha=0.6, s=100)
+                        label='Dane z Tobii 5', alpha=0.6, s=100)
             plt.scatter(person_preds[mask_5x5, 0], person_preds[mask_5x5, 1],
-                        label='Predicted Points (5x5)', alpha=0.6, s=100, c='r', marker='x')
+                        label='Predykcje modelu', alpha=0.6, s=100, c='r', marker='x')
             for i in np.where(mask_5x5)[0]:
                 plt.plot([person_labels[i, 0], person_preds[i, 0]],
                          [person_labels[i, 1], person_preds[i, 1]],
                          'k-', alpha=0.2)
-            plt.title(f'Test Set: Actual Gaze vs. Predicted Gaze (5x5) - Person {pid}')
-            plt.xlabel('X coordinate')
-            plt.ylabel('Y coordinate')
+            plt.title(f'Predykcje modelu na tle danych referencyjnych dla użytkownika: {pid}')
+            plt.xlabel('X')
+            plt.ylabel('Y')
             plt.legend()
             plt.grid(True)
             plt.xlim(0, SCREEN_W)
@@ -153,12 +153,12 @@ def evaluate_regressor(
         if np.any(mask_smooth):
             plt.figure(figsize=(12, 8))
             plt.plot(person_labels[mask_smooth, 0], person_labels[mask_smooth, 1],
-                     'b-o', label='Actual Trajectory', markersize=5)
+                     'b-o', label='Dane z Tobii 5', markersize=5)
             plt.plot(person_preds[mask_smooth, 0], person_preds[mask_smooth, 1],
-                     'r-x', label='Predicted Trajectory', markersize=5)
-            plt.title(f'Test Set: Actual vs. Predicted Gaze Trajectory (Smooth Pursuit) - Person {pid}')
-            plt.xlabel('X coordinate')
-            plt.ylabel('Y coordinate')
+                     'r-x', label='Predykcje modelu', markersize=5)
+            plt.title(f'Predykcje modelu na tle danych referencyjnych dla użytkownika: {pid}')
+            plt.xlabel('X')
+            plt.ylabel('Y')
             plt.legend()
             plt.grid(True)
             plt.xlim(0, SCREEN_W)

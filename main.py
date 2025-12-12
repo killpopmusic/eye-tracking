@@ -11,6 +11,7 @@ from src.train import train_regressor
 from src.evaluate import evaluate_regressor
 from src.utils.h5_data_loader import get_h5_data_loaders_regression, _prepare_h5_data_regression
 from src.models.gaze_regressor import GazeRegressor
+from src.models.gaze_regressor_min import GazeRegressorMin
 
 
 def main():
@@ -20,7 +21,7 @@ def main():
     parser.add_argument('--data_path', type=str, default='data/HybridGaze.h5', help='Path to the training/evaluation data.')
     parser.add_argument('--epochs', type=int, default=50, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and validation.')
-    parser.add_argument('--lr', type=float, default=0.0003, help='Learning rate for the optimizer.')
+    parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
     parser.add_argument('--model_path', type=str, default='models/gaze_regressor.pth', help='Path to save or load the model.')
     parser.add_argument('--target_space', type=str, default='normalized', choices=['normalized', 'pixel'], help='Target space for regression labels.')
 
@@ -30,6 +31,7 @@ def main():
 
     model_map = {
         'GazeRegressor': GazeRegressor,
+        'GazeRegressorMin': GazeRegressorMin,
     }
     model_class = model_map.get(args.model_name)
     

@@ -1,7 +1,7 @@
 import h5py
 import numpy as np
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import RobustScaler, StandardScaler
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 import joblib
@@ -165,7 +165,7 @@ def get_h5_data_loaders_regression(
         X_val_raw, y_val_raw     = X_train_val[val_idx], y_train_val[val_idx]
 
     # Scale features (X only)
-    scaler = RobustScaler() #switched from standard to robust scaler to reduce outlier impact
+    scaler = StandardScaler() #switched from standard to robust scaler to reduce outlier impact
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_val_scaled = scaler.transform(X_val_raw)
     X_test_scaled = scaler.transform(X_test)
@@ -182,7 +182,7 @@ def get_h5_data_loaders_regression(
     X_val = torch.tensor(X_val_scaled, dtype=torch.float32)
     X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
 
-    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(TensorDataset(X_test_tensor, y_test_tensor), batch_size=batch_size, shuffle=False)
 
