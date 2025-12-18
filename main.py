@@ -22,8 +22,8 @@ def main():
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and validation.')
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
     parser.add_argument('--model_path', type=str, default='models/gaze_classifier.pth', help='Path to save or load the model.')
-    parser.add_argument('--grid_rows', type=int, default=3, help='Number of rows in the classification grid.')
-    parser.add_argument('--grid_cols', type=int, default=3, help='Number of columns in the classification grid.')
+    parser.add_argument('--grid_rows', type=int, default=1, help='Number of rows in the classification grid.')
+    parser.add_argument('--grid_cols', type=int, default=5, help='Number of columns in the classification grid.')
     parser.add_argument('--calibrate', action='store_true', help='Enable calibration for the test person using 3x3 grid data.')
     parser.add_argument('--eval_exclude_3x3', action='store_true', help='Exclude 3x3 data from evaluation (for fair comparison).')
 
@@ -80,8 +80,7 @@ def main():
         ) = get_h5_data_loaders(**data_loader_params)
 
         model = model_class(input_features, num_classes=num_classes).to(device)
-        
-        # Save to a distinct final path
+
         final_model_path = os.path.join('trained_models', 'final_model.pth')
 
         train_classifier(
@@ -163,12 +162,12 @@ def main():
                 X_test_all = test_loader.dataset.tensors[0]
                 y_test_all = test_loader.dataset.tensors[1]
 
-                X_calib, y_calib, X_eval, y_eval, calib_mask = split_calibration_data(
+                X_calib, y_calib, X_eval, y_eval, test_mask = split_calibration_data(
                     X_test_all,
                     y_test_all,
                     source_csv_test,
-                    calibration_files=['data_3x3.csv'],
-                    calibration_fraction=1.0,
+                    calibration_files=['data_5x5.csv'],
+                    calibration_fraction=0.1,
                 )
 
             if args.calibrate:
@@ -181,21 +180,20 @@ def main():
                     )
                     fine_tune_model(model, calib_loader, epochs=10, lr=0.00005)
                 else:
-                    print("No calibration data found (data_3x3.csv). Skipping calibration.")
+                    print("No calibration data found. Skipping calibration.")
 
             if args.calibrate or args.eval_exclude_3x3:
-                if calib_mask is not None:
+                if test_mask is not None:
                     test_loader = torch.utils.data.DataLoader(
                         torch.utils.data.TensorDataset(X_eval, y_eval),
                         batch_size=args.batch_size,
                         shuffle=False,
                     )
 
-                    eval_mask = ~calib_mask
-                    source_csv_test = source_csv_test[eval_mask]
-                    y_test = y_test[eval_mask]
-                    gaze_test = gaze_test[eval_mask]
-                    person_ids_test = person_ids_test[eval_mask]
+                    source_csv_test = source_csv_test[test_mask]
+                    y_test = y_test[test_mask]
+                    gaze_test = gaze_test[test_mask]
+                    person_ids_test = person_ids_test[test_mask]
 
             fold_results = evaluate_classifier(
                 model,
@@ -246,6 +244,8 @@ def main():
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "model_name": model_class.__name__,
         "model_path_template": args.model_path,
+        "calibration_performed": args.calibrate,
+        "eval_exclude_3x3": args.eval_exclude_3x3,
         "hyperparameters": hyperparameters,
         "grid_rows": args.grid_rows,
         "grid_cols": args.grid_cols,

@@ -74,7 +74,6 @@ def _prepare_h5_data(
         all_person_ids = np.array([pid.decode('utf-8') for pid in data_group['person_id'][:]])
         all_source_csv = np.array([x.decode('utf-8') for x in data_group['source_csv'][:]])
 
-    # Filter out calibration data
     calibration_mask = np.isin(all_source_csv, ['data_3x3.csv', 'data_5x5.csv', 'data_smooth.csv'])
     all_landmarks = all_landmarks[calibration_mask]
     all_marker_x = all_marker_x[calibration_mask]
@@ -220,38 +219,42 @@ def get_h5_data_loaders(
 
     return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test, weight_tensor
 
-def split_calibration_data(X, y, source_csv, calibration_files=['data_3x3.csv'], calibration_fraction=1.0):
-    # Identify all potential calibration samples
+def split_calibration_data(X, y, source_csv, calibration_files=['data_3x3.csv'], calibration_fraction=0.15):
     is_calib_file = np.isin(source_csv, calibration_files)
     
     calib_indices = np.where(is_calib_file)[0]
-    eval_indices = np.where(~is_calib_file)[0]
+    non_calib_indices = np.where(~is_calib_file)[0]
     
-    if calibration_fraction < 1.0 and len(calib_indices) > 0:
+    if len(calib_indices) > 0:
         try:
-            # Stratified split to ensure all grid points are covered
-            selected_calib_idx, _ = train_test_split(
+            train_calib_idx, test_calib_idx = train_test_split(
                 calib_indices, 
                 train_size=calibration_fraction, 
                 stratify=y[calib_indices],
                 random_state=42
             )
         except ValueError:
-            # Fallback if stratification fails
-            selected_calib_idx, _ = train_test_split(
+            train_calib_idx, test_calib_idx = train_test_split(
                 calib_indices, 
                 train_size=calibration_fraction, 
                 random_state=42
             )
         
-        X_calib = X[selected_calib_idx]
-        y_calib = y[selected_calib_idx]
+        X_calib = X[train_calib_idx]
+        y_calib = y[train_calib_idx]
+        
+        # Test set = rest of dataa
+        final_test_indices = np.concatenate([test_calib_idx, non_calib_indices])
+        final_test_indices.sort() 
+ 
+        test_mask = np.zeros(len(X), dtype=bool)
+        test_mask[final_test_indices] = True
+        
+        X_test = X[final_test_indices]
+        y_test = y[final_test_indices]
+        
+        return X_calib, y_calib, X_test, y_test, test_mask
+        
     else:
-        X_calib = X[calib_indices]
-        y_calib = y[calib_indices]
-    
-    X_test = X[eval_indices]
-    y_test = y[eval_indices]
-    
-    return X_calib, y_calib, X_test, y_test, is_calib_file
+        return X[[]], y[[]], X, y, np.ones(len(X), dtype=bool)
 
