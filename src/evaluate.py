@@ -17,7 +17,10 @@ def evaluate_regressor(
     target_space: str = "normalized",
 ):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.load_state_dict(torch.load(model_path)['model_state_dict'])
+    if model_path is not None:
+        checkpoint = torch.load(model_path, map_location=device)
+        state_dict = checkpoint.get('model_state_dict', checkpoint) if isinstance(checkpoint, dict) else checkpoint
+        model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
 

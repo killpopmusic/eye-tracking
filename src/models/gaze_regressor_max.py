@@ -17,6 +17,16 @@ class GazeRegressor(nn.Module):
             nn.LayerNorm(128),
             nn.SiLU(),
             nn.Dropout(0.4),
+            
+            nn.Linear(128, 128),
+            nn.LayerNorm(128),
+            nn.SiLU(),
+            nn.Dropout(0.4),
+
+            nn.Linear(128, 128),
+            nn.LayerNorm(128),
+            nn.SiLU(),
+            nn.Dropout(0.4),
 
             nn.Linear(128, 64),
             nn.LayerNorm(64),

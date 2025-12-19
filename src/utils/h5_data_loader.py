@@ -29,38 +29,37 @@ def _prepare_h5_data_regression(
 ):
 
     KEY_LANDMARK_INDICES = [
-        # Right eye
-        33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246,
-        
-        # Right iris
-        468, 469, 470, 471, 472,
+    # Right eye
+    33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246,
+    
+    # Right iris
+    468, 469, 470, 471, 472,
 
-        # Left eye
-        362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398,
+    # Left eye
+    362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398,
+    # Left iris
+    473, 474, 475, 476, 477,
 
-        # Left iris
-        473, 474, 475, 476, 477,
+    # Right upper eyelid
+    124, 113, 247, 30, 29, 27, 28, 56, 190, 189, 221, 222, 223, 224, 225,
 
-        # Right upper eyelid
-        124, 113, 247, 30, 29, 27, 28, 56, 190, 189, 221, 222, 223, 224, 225,
+    # Right lower eyelid 
+    130, 226, 31, 228, 229, 230, 231, 232, 233, 245, 244, 112, 26, 22, 23, 24, 110, 25,243,
 
-        # Right lower eyelid 
-        130, 226, 31, 228, 229, 230, 231, 232, 233, 245, 244, 112, 26, 22, 23, 24, 110, 25,
+    #Left upper eyelid 
+    413, 414, 286, 258, 257, 259, 260, 467, 342, 353, 445, 444, 443, 442, 441,
 
-        #Left upper eyelid 
-        413, 414, 286, 258, 257, 259, 260, 467, 342, 353, 445, 444, 443, 442, 441,
+    # Left lower eyelid 
+    464, 465, 453, 452, 451, 450, 449, 448, 261, 446, 359, 255, 339, 254, 253, 252, 256, 341,
 
-        # Left lower eyelid 
-        464, 465, 453, 452, 451, 450, 449, 448, 261, 446, 359, 255, 339, 254, 253, 252, 256, 341,
+    #Nose 
+    1, 4, 5, 195, 197, 6, 168, 8, 9, 
 
-        #Nose 
-         1, 4, 5, 195, 197, 6, 168, 8, 9, #19, 196, 122, 188, 114, 217, 126, 209, 49, 48, 64, 237, 44, 35, 274, 309, 392, 294, 279, 429, 355, 437, 343, 412, 357, 351,
+    #Chin 
+    152,  175, 428, 199, 208
 
-        #Chin 
-        152,  175, 428, 199, 208, 138#,135, 169, 170, 140, 171, 396, 369, 394, 364, 367
-
-    ]
-
+]
+    print(f"Length of KEY_LANDMARK_INDICES: {len(KEY_LANDMARK_INDICES)}")
     with h5py.File(data_path, 'r') as f:
         data_group = f['data']
         
@@ -192,3 +191,41 @@ def get_h5_data_loaders_regression(
 
     return train_loader, val_loader, test_loader, input_dim, source_csv_test, y_test, gaze_test, person_ids_test
 
+def split_calibration_data(X, y, source_csv, calibration_files=['data_3x3.csv'], calibration_fraction=0.15):
+    is_calib_file = np.isin(source_csv, calibration_files)
+    
+    calib_indices = np.where(is_calib_file)[0]
+    non_calib_indices = np.where(~is_calib_file)[0]
+    
+    if len(calib_indices) > 0:
+        try:
+            train_calib_idx, test_calib_idx = train_test_split(
+                calib_indices, 
+                train_size=calibration_fraction, 
+                stratify=y[calib_indices],
+                random_state=42
+            )
+        except ValueError:
+            train_calib_idx, test_calib_idx = train_test_split(
+                calib_indices, 
+                train_size=calibration_fraction, 
+                random_state=42
+            )
+        
+        X_calib = X[train_calib_idx]
+        y_calib = y[train_calib_idx]
+        
+        # Test set = rest of dataa
+        final_test_indices = np.concatenate([test_calib_idx, non_calib_indices])
+        final_test_indices.sort() 
+ 
+        test_mask = np.zeros(len(X), dtype=bool)
+        test_mask[final_test_indices] = True
+        
+        X_test = X[final_test_indices]
+        y_test = y[final_test_indices]
+        
+        return X_calib, y_calib, X_test, y_test, test_mask
+        
+    else:
+        return X[[]], y[[]], X, y, np.ones(len(X), dtype=bool)

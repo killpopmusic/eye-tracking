@@ -7,11 +7,12 @@ import torch
 import h5py
 import numpy as np
 
-from src.train import train_regressor
+from src.train import train_regressor, fine_tune_model
 from src.evaluate import evaluate_regressor
-from src.utils.h5_data_loader import get_h5_data_loaders_regression, _prepare_h5_data_regression
+from src.utils.h5_data_loader import get_h5_data_loaders_regression, _prepare_h5_data_regression, split_calibration_data
 from src.models.gaze_regressor import GazeRegressor
 from src.models.gaze_regressor_min import GazeRegressorMin
+from src.models.gaze_regressor_max import GazeRegressor as GazeRegressorMax 
 
 
 def main():
@@ -24,14 +25,16 @@ def main():
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
     parser.add_argument('--model_path', type=str, default='models/gaze_regressor.pth', help='Path to save or load the model.')
     parser.add_argument('--target_space', type=str, default='normalized', choices=['normalized', 'pixel'], help='Target space for regression labels.')
+    parser.add_argument('--calibrate', action='store_true', help='Enable calibration for the test person using 3x3 grid data.')
+    parser.add_argument('--eval_exclude_3x3', action='store_true', help='Exclude 3x3 data from evaluation (for fair comparison).')
 
     args = parser.parse_args()
-
     output_dim = 2
 
     model_map = {
         'GazeRegressor': GazeRegressor,
         'GazeRegressorMin': GazeRegressorMin,
+        'GazeRegressorMax': GazeRegressorMax,
     }
     model_class = model_map.get(args.model_name)
     
@@ -78,10 +81,9 @@ def main():
         (
             train_loader,
             val_loader,
-            _, # test_loader is empty
+            _,  # test_loader is empty
             input_features,
-            _, _, _, _, # unused test data
-            class_weights,
+            _, _, _, _,  # unused test data
         ) = get_h5_data_loaders_regression(**data_loader_params)
 
         model = model_class(input_features, output_dim=output_dim).to(device)
@@ -152,10 +154,56 @@ def main():
                 print(f"Model file not found at {fold_model_path}, skipping this fold.")
                 continue
 
+            # Load trained fold weights (so calibration + evaluation use the same base model)
+            try:
+                checkpoint = torch.load(fold_model_path, map_location=device)
+                state_dict = checkpoint.get('model_state_dict', checkpoint) if isinstance(checkpoint, dict) else checkpoint
+                model.load_state_dict(state_dict)
+            except Exception as e:
+                print(f"Error loading model: {e}")
+
+            if args.calibrate or args.eval_exclude_3x3:
+                X_test_all = test_loader.dataset.tensors[0]
+                y_test_all = test_loader.dataset.tensors[1]
+
+                X_calib, y_calib, X_eval, y_eval, test_mask = split_calibration_data(
+                    X_test_all,
+                    y_test_all,
+                    source_csv_test,
+                    calibration_files=['data_3x3.csv', 'data_5x5.csv'],
+                    calibration_fraction=0.1,
+                )
+
+            if args.calibrate:
+                print(f"--- Calibrating for person {leave_out_pid} ---")
+                if len(X_calib) > 0:
+                    calib_loader = torch.utils.data.DataLoader(
+                        torch.utils.data.TensorDataset(X_calib, y_calib),
+                        batch_size=16,
+                        shuffle=True,
+                    )
+                    fine_tune_model(model, calib_loader, epochs=10, lr=0.00005)
+                else:
+                    print("No calibration data found. Skipping calibration.")
+
+            if args.calibrate or args.eval_exclude_3x3:
+                if test_mask is not None:
+                    test_loader = torch.utils.data.DataLoader(
+                        torch.utils.data.TensorDataset(X_eval, y_eval),
+                        batch_size=args.batch_size,
+                        shuffle=False,
+                    )
+
+                    source_csv_test = source_csv_test[test_mask]
+                    y_test = y_test[test_mask]
+                    gaze_test = gaze_test[test_mask]
+                    person_ids_test = person_ids_test[test_mask]
+
+
             fold_results = evaluate_regressor(
                 model,
                 test_loader,
-                fold_model_path,
+                None,
                 person_ids_test,
                 source_csv_test,
                 hyperparameters,
@@ -163,6 +211,7 @@ def main():
             )
 
             all_person_results.extend(fold_results)
+
 
     excluded_for_aggregate =  ['2025_06_02_11_09_16', '2025_05_27_10_57_49', '2025_06_07_22_33_55']
 
@@ -194,10 +243,13 @@ def main():
     summary = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "model_name": model_class.__name__,
+        "num_params": sum(p.numel() for p in model.parameters()) if 'model' in locals() else 0,
         "model_path_template": args.model_path,
         "hyperparameters": hyperparameters,
         "task": "regression",
         "target_space": args.target_space,
+        "calibrate": args.calibrate,
+        "eval_exclude_3x3": args.eval_exclude_3x3,
         "per_person_results": all_person_results,
         "aggregate_metrics": aggregate_metrics,
     }

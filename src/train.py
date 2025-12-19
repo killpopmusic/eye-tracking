@@ -123,3 +123,41 @@ def train_regressor(model, train_loader, val_loader, num_epochs, lr, model_path,
         }
         torch.save(save_dict, model_path)
         print(f"Model saved to {model_path}")
+
+def fine_tune_model(model, train_loader, epochs=10, lr=0.0001):
+    #1st linear layer only!
+    device = next(model.parameters()).device
+    model.train()
+
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    trainable_params = []
+    first_linear = None
+
+    for module in model.modules():
+        if isinstance(module, torch.nn.Linear):
+            first_linear = module
+            break
+            
+    if first_linear:
+        for param in first_linear.parameters():
+            param.requires_grad = True
+            trainable_params.append(param)
+        print("Fine-tuning strategy: Optimizing FIRST Layer (Input Adaptation).")
+    
+    if not trainable_params:
+        print("Error: No trainable parameters found.")
+        return
+
+    optimizer = torch.optim.Adam(trainable_params, lr=lr, weight_decay=0.001)
+    criterion = torch.nn.SmoothL1Loss()
+
+    for _ in range(epochs):
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
