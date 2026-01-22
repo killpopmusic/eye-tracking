@@ -126,3 +126,5 @@ dmypy.json
 
 # Ignore Poetry’s local environment configuration if it exists
 poetry.toml
+
+wandb/

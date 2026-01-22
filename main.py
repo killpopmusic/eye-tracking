@@ -6,6 +6,11 @@ import torch
 import h5py
 import numpy as np
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 from src.train import train_classifier, fine_tune_model
 from src.evaluate import evaluate_classifier
 from src.utils.h5_data_loader import get_h5_data_loaders, _prepare_h5_data, split_calibration_data
@@ -17,16 +22,21 @@ from src.models.gaze_classifier_max import GazeClassifierMax
 def main():
     parser = argparse.ArgumentParser(description="Gaze Classification Model Training and Evaluation")
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'evaluate', 'train_final'], help='Mode to run the script in.')
-    parser.add_argument('--model_name', type=str, default='GazeClassifierMax', help='Name of the model class to use.')
+    parser.add_argument('--model_name', type=str, default='GazeClassifier', help='Name of the model class to use.')
     parser.add_argument('--data_path', type=str, default='data/HybridGaze.h5', help='Path to the training/evaluation data.')
     parser.add_argument('--epochs', type=int, default=30, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training and validation.')
     parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate for the optimizer.')
     parser.add_argument('--model_path', type=str, default='models/gaze_classifier.pth', help='Path to save or load the model.')
-    parser.add_argument('--grid_rows', type=int, default=1, help='Number of rows in the classification grid.')
-    parser.add_argument('--grid_cols', type=int, default=5, help='Number of columns in the classification grid.')
+    parser.add_argument('--grid_rows', type=int, default=3, help='Number of rows in the classification grid.')
+    parser.add_argument('--grid_cols', type=int, default=3, help='Number of columns in the classification grid.')
     parser.add_argument('--calibrate', action='store_true', help='Enable calibration for the test person using 3x3 grid data.')
     parser.add_argument('--eval_exclude_3x3', action='store_true', help='Exclude 3x3 data from evaluation (for fair comparison).')
+    
+    # WandB arguments
+    parser.add_argument('--use_wandb', action='store_true', help='Enable Weights & Biases logging.')
+    parser.add_argument('--wandb_project', type=str, default='eye-tracking', help='WandB project name.')
+    parser.add_argument('--wandb_entity', type=str, default=None, help='WandB entity/username.')
 
     args = parser.parse_args()
 
@@ -57,6 +67,16 @@ def main():
 
         train_person_ids = all_person_ids
         test_person_ids = np.array([]) # No test subjects
+        
+        if args.use_wandb and wandb:
+            run_name = f"train_final_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            wandb.init(
+                project=args.wandb_project,
+                entity=args.wandb_entity,
+                name=run_name,
+                config=hyperparameters,
+                job_type="train_final"
+            )
 
         os.makedirs('trained_models', exist_ok=True)
         scaler_save_path = os.path.join('trained_models', 'production_scaler.pkl')
@@ -97,12 +117,30 @@ def main():
         )
         print(f"Final model saved to {final_model_path}")
         print(f"Scaler saved to {scaler_save_path}")
+        
+        if args.use_wandb and wandb:
+            wandb.finish()
+            
         return
 
     all_person_results = []
+    total_params = 0
+    model_size_mb = 0
 
     for leave_out_pid in all_person_ids:
         print(f"\n===== LOSO fold: test person {leave_out_pid} =====")
+        
+        if args.use_wandb and wandb:
+            run_name = f"loso_fold_{leave_out_pid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            wandb.init(
+                project=args.wandb_project,
+                entity=args.wandb_entity,
+                group=f"loso_{args.model_name}",
+                name=run_name,
+                config=hyperparameters,
+                reinit=True,
+                job_type="loso_cv"
+            )
 
         train_person_ids = all_person_ids[all_person_ids != leave_out_pid]
         test_person_ids = np.array([leave_out_pid])
@@ -129,6 +167,16 @@ def main():
         ) = get_h5_data_loaders(**data_loader_params)
 
         model = model_class(input_features, num_classes=num_classes).to(device)
+        
+        total_params = sum(p.numel() for p in model.parameters())
+        model_size_mb = total_params * 4 / (1024 ** 2)
+        print(f"Total parameters: {total_params} ({model_size_mb:.2f} MB)") 
+        
+        if args.use_wandb and wandb and wandb.run:
+             wandb.config.update({
+                 "total_params": total_params,
+                 "model_size_mb": model_size_mb
+             }, allow_val_change=True)
 
         fold_model_path = args.model_path
         base, ext = os.path.splitext(args.model_path)
@@ -212,6 +260,9 @@ def main():
 
             all_person_results.extend(fold_results)
 
+        if args.use_wandb and wandb:
+            wandb.finish()
+
     excluded_for_aggregate =  ['2025_06_02_11_09_16', '2025_05_27_10_57_49', '2025_06_07_22_33_55']
 
     included_for_aggregate = [
@@ -236,6 +287,8 @@ def main():
             "precision_macro_std": float(np.std(precision_macros)),
             "recall_macro_mean": float(np.mean(recall_macros)),
             "recall_macro_std": float(np.std(recall_macros)),
+            "total_params": total_params,
+            "model_size_mb": model_size_mb,
             "included_person_ids": [r["person_id"] for r in included_for_aggregate],
             "excluded_person_ids": list(excluded_for_aggregate),
         }
@@ -261,6 +314,18 @@ def main():
     with open(summary_path, "w") as f: json.dump(summary, f, indent=2)
 
     print(f"Global LOSO summary saved to {summary_path}")
+
+    if args.use_wandb and wandb and aggregate_metrics:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            group=f"loso_{args.model_name}",
+            job_type="summary",
+            name=f"loso_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            config=hyperparameters
+        )
+        wandb.log(aggregate_metrics)
+        wandb.finish()
 
 if __name__ == '__main__':
     main()

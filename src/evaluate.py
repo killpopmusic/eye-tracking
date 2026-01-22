@@ -5,7 +5,13 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import time
 from sklearn.metrics import accuracy_score, confusion_matrix, balanced_accuracy_score, precision_recall_fscore_support
+
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 
 def evaluate_classifier(
@@ -40,6 +46,8 @@ def evaluate_classifier(
     all_labels = []
     all_preds = []
 
+    inference_start_time = time.time()
+    total_samples = 0
     with torch.inference_mode():
         for inputs, labels in test_loader:
             inputs = inputs.to(device)
@@ -47,6 +55,16 @@ def evaluate_classifier(
             _, predicted_classes = torch.max(outputs, 1)
             all_preds.extend(predicted_classes.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
+            total_samples += inputs.size(0)
+    
+    inference_end_time = time.time()
+    inference_duration = inference_end_time - inference_start_time
+    inference_throughput = total_samples / inference_duration if inference_duration > 0 else 0
+    inference_latency_ms = (inference_duration * 1000) / total_samples if total_samples > 0 else 0
+    
+    print(f"Inference Time: {inference_duration:.4f}s")
+    print(f"Inference Throughput: {inference_throughput:.2f} samples/s")
+    print(f"Inference Latency: {inference_latency_ms:.4f} ms/sample")
 
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
@@ -75,6 +93,13 @@ def evaluate_classifier(
         )
 
         cm = confusion_matrix(person_labels, person_preds, labels=np.arange(grid_rows * grid_cols))
+        cm_row_sums = cm.sum(axis=1, keepdims=True)
+        cm_normalized = np.divide(
+            cm,
+            cm_row_sums,
+            out=np.zeros_like(cm, dtype=float),
+            where=cm_row_sums != 0,
+        )
 
         print(f"Test Accuracy: {accuracy:.4f}")
         print(f"Balanced Accuracy: {balanced_acc:.4f}")
@@ -97,14 +122,35 @@ def evaluate_classifier(
         os.makedirs(plot_dir, exist_ok=True)
         
         plt.figure(figsize=(10, 8))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=np.arange(grid_rows*grid_cols), yticklabels=np.arange(grid_rows*grid_cols))
-        plt.title(f'Confusion Matrix - Person {person_id}')
-        plt.xlabel('Predicted Class')
-        plt.ylabel('True Class')
+        sns.heatmap(
+            cm_normalized * 100.0,
+            annot=True,
+            fmt='.1f',
+            cmap='Blues',
+            vmin=0,
+            vmax=100,
+            cbar_kws={'label': 'Próbki [%]'},
+            xticklabels=np.arange(grid_rows * grid_cols),
+            yticklabels=np.arange(grid_rows * grid_cols),
+        )
+        plt.title(f'Macierz pomyłek [%] dla użytkownika {person_id}')
+        plt.xlabel('Klasa przewidziana')
+        plt.ylabel('Klasa rzeczywista')
         cm_path = os.path.join(plot_dir, 'confusion_matrix.png')
         plt.savefig(cm_path)
         print(f"Confusion matrix for person {person_id} saved to {cm_path}")
         plt.close()
+
+        if wandb and wandb.run:
+            wandb.log({
+                "test_accuracy": accuracy,
+                "test_balanced_accuracy": balanced_acc,
+                "test_f1_macro": f1_macro,
+                "confusion_matrix": wandb.Image(cm_path),
+                "person_id": int(person_id),
+                "inference_throughput_samples_per_sec": inference_throughput,
+                "inference_latency_ms_per_sample": inference_latency_ms
+            })
 
 
     return per_person_results

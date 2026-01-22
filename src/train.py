@@ -6,6 +6,12 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.amp import GradScaler, autocast
 import matplotlib.pyplot as plt
 import numpy as np
+import time
+
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -34,6 +40,7 @@ def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path
     best_model_state = None
 
     for epoch in range(num_epochs):
+        epoch_start_time = time.time()
         model.train()
         running_loss = 0.0
         correct_train = 0
@@ -87,9 +94,26 @@ def train_classifier(model, train_loader, val_loader, num_epochs, lr, model_path
         val_acc = 100 * correct_val / total_val
         val_accuracies.append(val_acc)
         
+        epoch_end_time = time.time()
+        epoch_duration = epoch_end_time - epoch_start_time
+        train_samples_per_sec = total_train / epoch_duration
+
         print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+        print(f"Time: {epoch_duration:.2f}s, Throughput: {train_samples_per_sec:.2f} samples/s")
 
         scheduler.step(val_loss)
+
+        if wandb and wandb.run:
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "train_acc": train_acc,
+                "val_loss": val_loss,
+                "val_acc": val_acc,
+                "lr": optimizer.param_groups[0]['lr'],
+                "epoch_duration_sec": epoch_duration,
+                "train_throughput_samples_per_sec": train_samples_per_sec
+            })
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
