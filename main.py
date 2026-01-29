@@ -56,7 +56,7 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    X_all, y_all, gaze_all, person_ids_all, source_csv_all = _prepare_h5_data(data_path=args.data_path, normalization_mode="raw", grid_rows=args.grid_rows, grid_cols=args.grid_cols,)
+    X_all, y_all, gaze_all, person_ids_all, source_csv_all = _prepare_h5_data(data_path=args.data_path, grid_rows=args.grid_rows, grid_cols=args.grid_cols,)
 
     all_person_ids = np.unique(person_ids_all)
 
@@ -95,9 +95,9 @@ def main():
         (
             train_loader,
             val_loader,
-            _, # test_loader is empty
+            _, # test_loader is empty 
             input_features,
-            _, _, _, _, # unused test data
+            _, _, _, _, # unused test data 
             class_weights,
         ) = get_h5_data_loaders(**data_loader_params)
 

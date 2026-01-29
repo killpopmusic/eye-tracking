@@ -6,7 +6,6 @@ from sklearn.utils.class_weight import compute_class_weight
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 import joblib
-from .landmark_normalization import normalize_landmarks
 
 '''
 H5 structure:
@@ -27,7 +26,6 @@ def _prepare_h5_data(
     data_path,
     grid_rows: int,
     grid_cols: int,
-    normalization_mode: str = "raw",
 ):
 
     KEY_LANDMARK_INDICES = [
@@ -94,7 +92,7 @@ def _prepare_h5_data(
     landmarks_valid = all_landmarks[valid_indices]
 
 
-    landmarks_normalized = normalize_landmarks(landmarks_valid,KEY_LANDMARK_INDICES, mode=normalization_mode)
+    landmarks_normalized = landmarks_valid[:, KEY_LANDMARK_INDICES, :]
 
     # TARGET SPECIFICATION (markers/gaze_points):
     gaze_pixels = np.stack((all_gaze_x[valid_indices], all_gaze_y[valid_indices]), axis=-1)
@@ -127,7 +125,6 @@ def get_h5_data_loaders(
     batch_size=32,
     train_person_ids=None,
     test_person_ids=None,
-    normalization_mode: str = "raw",
     calibration_split: float = 0.2,
     mode: str = "loso",
     scaler_path: str = "scaler.pkl",
@@ -135,7 +132,6 @@ def get_h5_data_loaders(
 
     X, y, gaze_ground_truth, person_ids_valid, source_csv_valid = _prepare_h5_data(
         data_path=data_path,
-        normalization_mode=normalization_mode,
         grid_rows=grid_rows,
         grid_cols=grid_cols,
     )
