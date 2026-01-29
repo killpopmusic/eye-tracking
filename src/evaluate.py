@@ -4,7 +4,13 @@ from datetime import datetime
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 
 def evaluate_regressor(
@@ -27,12 +33,24 @@ def evaluate_regressor(
     preds_list = []
     labels_list = []
 
+    inference_start_time = time.time()
+    total_samples = 0
     with torch.inference_mode():
         for inputs, labels in test_loader:
             inputs = inputs.to(device)
             outputs = model(inputs)
             preds_list.append(outputs.cpu().numpy())
             labels_list.append(labels.cpu().numpy())
+            total_samples += inputs.size(0)
+
+    inference_end_time = time.time()
+    inference_duration = inference_end_time - inference_start_time
+    inference_throughput = total_samples / inference_duration if inference_duration > 0 else 0
+    inference_latency_ms = (inference_duration * 1000) / total_samples if total_samples > 0 else 0
+
+    print(f"Inference Time: {inference_duration:.4f}s")
+    print(f"Inference Throughput: {inference_throughput:.2f} samples/s")
+    print(f"Inference Latency: {inference_latency_ms:.4f} ms/sample")
 
     preds = np.concatenate(preds_list, axis=0)
     labels = np.concatenate(labels_list, axis=0)
@@ -92,6 +110,18 @@ def evaluate_regressor(
         within_3deg_pct = float(np.mean(person_angles <= 3.0) * 100.0) if person_angles.size > 0 else 0.0
 
         print(f"Person {pid} — MAE(px): {mae:.2f}, RMSE(px): {rmse:.2f}, R2: {r2:.3f}")
+
+        if wandb and wandb.run:
+            wandb.log({
+                "person_id": int(pid),
+                "test_mae_px": mae,
+                "test_rmse_px": rmse,
+                "test_r2": r2,
+                "test_angular_error_deg_mean": float(np.mean(person_angles)) if person_angles.size > 0 else 0.0,
+                "test_within_3deg_pct": within_3deg_pct,
+                "inference_throughput": inference_throughput,
+                "inference_latency_ms": inference_latency_ms
+            })
 
         # Arrays per person
         person_labels = labels_px[person_mask]
@@ -178,7 +208,10 @@ def evaluate_regressor(
                 "mae_px": float(mae),
                 "rmse_px": float(rmse),
                 "r2": float(r2) if not np.isnan(r2) else None,
+                "angular_error_deg_mean": float(np.mean(person_angles)) if person_angles.size > 0 else 0.0,
                 "within_3deg_pct": within_3deg_pct,
+                "inference_throughput": float(inference_throughput),
+                "inference_latency_ms": float(inference_latency_ms)
             },
             "hyperparameters": hyperparameters,
         })

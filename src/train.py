@@ -6,6 +6,12 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.amp import GradScaler, autocast
 import matplotlib.pyplot as plt
 import numpy as np
+import time
+
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -29,13 +35,16 @@ def train_regressor(model, train_loader, val_loader, num_epochs, lr, model_path,
     best_model_state = None
 
     for epoch in range(num_epochs):
+        epoch_start_time = time.time()
         model.train()
         running_loss = 0.0
         # regression: no accuracy
         
+        total_train_samples = 0
         for inputs, labels in train_loader:
             inputs = inputs.to(device)
             labels = labels.to(device)
+            total_train_samples += inputs.size(0)
             optimizer.zero_grad()
             
             with autocast("cuda"):
@@ -71,9 +80,26 @@ def train_regressor(model, train_loader, val_loader, num_epochs, lr, model_path,
         val_loss = running_val_loss / len(val_loader)
         val_losses.append(val_loss)
         val_maes.append(batch_mae)
+        
+        epoch_end_time = time.time()
+        epoch_duration = epoch_end_time - epoch_start_time
+        train_throughput = total_train_samples / epoch_duration if epoch_duration > 0 else 0
+
         print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val MAE: {batch_mae:.4f}")
+        print(f"Time: {epoch_duration:.2f}s, Throughput: {train_throughput:.2f} samples/s")
 
         scheduler.step(val_loss)
+
+        if wandb and wandb.run:
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "val_mae": batch_mae,
+                "lr": optimizer.param_groups[0]['lr'],
+                "epoch_duration_sec": epoch_duration,
+                "train_throughput_samples_per_sec": train_throughput
+            })
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
