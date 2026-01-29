@@ -1,23 +1,23 @@
-# Eye tracking computing environment
+# Eye Tracking Computing Environment
 
-### About
-The projet provides a modular environment, which enables various test regarding eye tracking algorithm utlizing facial landmarks' coordinates. Different approaches to the gaze prediction can be found in dedicated branches.
+## About
+The project provides a modular environment that enables various tests regarding eye tracking algorithms utilizing facial landmark coordinates. Different approaches to gaze prediction can be found in dedicated branches.
 
-### Features 
-- Test of different appraoches of eye tracking task: regression of the gaze point, classification to the gaze ROI;
-- Complex database analysis tools in jupyter notebook;
-- Usage of different databases;
-- Simple change of used NN architectures along with hiperparameters;
-- Training and performance evaluation integrated with Weights and Biases;
-- Local saving of summarized test results and visualizations
+## Features
+- Testing different approaches to the eye tracking task: gaze point regression and gaze ROI classification;
+- Complex database analysis tools in Jupyter notebooks;
+- Support for multiple datasets;
+- Easy switching of neural network architectures along with hyperparameters;
+- Training and performance evaluation integrated with Weights & Biases;
+- Local saving of summarized test results and visualizations.
 
-### Requirements
+## Requirements
 - Ubuntu (minimum 22.04)
 - NVIDIA GPU with CUDA 12.x
 - Python 3.10+
 
-## Setup 
-The project uses poetry dependency managment, to install:
+## Setup
+
 ```
 curl -sSL https://install.python-poetry.org | python -
 ```
