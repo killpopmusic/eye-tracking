@@ -3,7 +3,6 @@ import os
 import json
 from datetime import datetime
 import torch
-import h5py
 import numpy as np
 
 try:
@@ -205,8 +204,6 @@ def main():
                 model.load_state_dict(state_dict)
             except Exception as e:
                 print(f"Error loading model: {e}")
-
-            calib_mask = None
 
             if args.calibrate or args.eval_exclude_calibration:
                 X_test_all = test_loader.dataset.tensors[0]
