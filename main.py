@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--grid_rows', type=int, default=3, help='Number of rows in the classification grid.')
     parser.add_argument('--grid_cols', type=int, default=3, help='Number of columns in the classification grid.')
     parser.add_argument('--calibrate', action='store_true', help='Enable calibration for the test person using 3x3 grid data.')
-    parser.add_argument('--eval_exclude_3x3', action='store_true', help='Exclude 3x3 data from evaluation (for fair comparison).')
+    parser.add_argument('--eval_exclude_calibration', action='store_true', help='Exclude calibration data from evaluation (for fair comparison).')
     
     # WandB arguments
     parser.add_argument('--use_wandb', action='store_true', help='Enable Weights & Biases logging.')
@@ -208,7 +208,7 @@ def main():
 
             calib_mask = None
 
-            if args.calibrate or args.eval_exclude_3x3:
+            if args.calibrate or args.eval_exclude_calibration:
                 X_test_all = test_loader.dataset.tensors[0]
                 y_test_all = test_loader.dataset.tensors[1]
 
@@ -232,7 +232,7 @@ def main():
                 else:
                     print("No calibration data found. Skipping calibration.")
 
-            if args.calibrate or args.eval_exclude_3x3:
+            if args.calibrate or args.eval_exclude_calibration:
                 if test_mask is not None:
                     test_loader = torch.utils.data.DataLoader(
                         torch.utils.data.TensorDataset(X_eval, y_eval),
@@ -300,7 +300,7 @@ def main():
         "model_name": model_class.__name__,
         "model_path_template": args.model_path,
         "calibration_performed": args.calibrate,
-        "eval_exclude_3x3": args.eval_exclude_3x3,
+        "eval_exclude_calibration": args.eval_exclude_calibration,
         "hyperparameters": hyperparameters,
         "grid_rows": args.grid_rows,
         "grid_cols": args.grid_cols,
